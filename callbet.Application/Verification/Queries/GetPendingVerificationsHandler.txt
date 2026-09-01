@@ -1,0 +1,13 @@
+using MediatR;
+using callbet.Application.Interfaces;
+
+namespace callbet.Application.Verification.Queries;
+
+public class GetPendingVerificationsHandler(IVerificationService service)
+    : IRequestHandler<GetPendingVerificationsQuery, IEnumerable<object>>
+{
+    public async Task<IEnumerable<object>> Handle(GetPendingVerificationsQuery request, CancellationToken ct)
+    {
+        return await service.GetPendingVerificationsAsync(ct);
+    }
+}
