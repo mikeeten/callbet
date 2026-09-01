@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="callbet.Api/callbet.Api.csproj" />
+  <Project Path="callbet.Application/callbet.Application.csproj" />
+  <Project Path="callbet.Domain/callbet.Domain.csproj" />
+  <Project Path="callbet.Infrastructure/callbet.Infrastructure.csproj" />
+</Solution>
