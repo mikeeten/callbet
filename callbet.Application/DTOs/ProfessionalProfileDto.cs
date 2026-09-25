@@ -9,7 +9,7 @@ namespace callbet.Application.DTOs
         public Guid UserId { get; set; }
         public string? Headline { get; set; }
         public string? Bio { get; set; }
-        public int ServiceRadiusKm { get; set; }
+        public double ServiceRadiusKm { get; set; }
         public int YearsOfExperience { get; set; }
         public decimal OverallRating { get; set; }
         public int CompletedJobsCount { get; set; }

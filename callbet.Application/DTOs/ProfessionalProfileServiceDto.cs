@@ -29,4 +29,11 @@ public class ProfessionalProfileServiceDto
     public Guid CategoryId { get; set; }
     public string CategoryName { get; set; } = null!;
     public string? CategoryIconUrl { get; set; }
+
+    // Proximity / Location Info
+    public double? DistanceKm { get; set; }
+    public int ServiceRadiusKm { get; set; } = 15;
+    public string? LocationName { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
 }

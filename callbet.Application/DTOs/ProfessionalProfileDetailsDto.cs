@@ -19,10 +19,11 @@ namespace callbet.Application.DTOs
         public int CompletedJobsCount { get; set; }
         public bool IsVerified { get; set; }
 
+        public AddressDto? BaseAddress { get; set; }
+        public IEnumerable<AddressDto> Addresses { get; set; } = new List<AddressDto>();
         public ResumeDto? Resume { get; set; }
         public IEnumerable<CertificateDto> Certificates { get; set; } = new List<CertificateDto>();
         public IEnumerable<PortfolioItemDto> PortfolioItems { get; set; } = new List<PortfolioItemDto>();
-        public IEnumerable<ProfessionalProfileServiceDto> Services { get; set; } = new List<ProfessionalProfileServiceDto>();
         public IEnumerable<AvailabilityScheduleDto> AvailabilitySchedules { get; set; } = new List<AvailabilityScheduleDto>();
         public IEnumerable<ReviewDto> Reviews { get; set; } = new List<ReviewDto>();
     }
