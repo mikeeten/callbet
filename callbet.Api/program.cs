@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Authorization;
 using callbet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using callbet.Domain.Entities;
-using callbet.Application.Users.Commands;
 using callbet.Application.Interfaces;
 using callbet.Infrastructure.Services;
 using callbet.Infrastructure.Security;
@@ -16,8 +15,7 @@ using System.Text;
 
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddMediatR(typeof(RegisterCustomerCommand).Assembly);
-builder.Services.AddMediatR(typeof(RegisterProfessionalCommand).Assembly);
+builder.Services.AddMediatR(typeof(ICustomerService).Assembly);
 builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<IProfessionalService, callbet.Infrastructure.Services.ProfessionalService>();
 builder.Services.AddScoped<IAdminService, AdminService>();
@@ -67,6 +65,21 @@ builder.Services.AddAuthentication(options =>
         IssuerSigningKey = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
     };
+
+    // 📡 Extract JWT token from Query string for WebSocket / SignalR connections
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        }
+    };
 });
 
 // Configure Enterprise Policy Authorization
@@ -81,7 +94,12 @@ builder.Services.AddAuthorization(options =>
     });
 });
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
+builder.Services.AddSignalR();
 builder.Services.AddOpenApi();
 
 builder.Services.AddCors(options =>
@@ -106,7 +124,7 @@ app.Use(async (context, next) =>
     context.Response.Headers.Append("X-Frame-Options", "DENY");
     context.Response.Headers.Append("X-XSS-Protection", "1; mode=block");
     context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
-    context.Response.Headers.Append("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:5189 http://localhost:4200;");
+    context.Response.Headers.Append("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:5189 http://localhost:4200 ws://localhost:5189 wss://localhost:5189 ws://localhost:4200 wss://localhost:4200;");
     await next();
 });
 
@@ -124,10 +142,15 @@ else
 }
 
 app.UseStatusCodePages();
+app.UseStaticFiles();
 app.UseRouting();
 app.UseCors("AllowAngular");
 app.UseAuthentication();   // establish identity
 app.UseAuthorization();    // enforce policies
 app.MapControllers();
+app.MapHub<callbet.Infrastructure.Hubs.ChatHub>("/hubs/chat");
+
+// Auto-seed Addis Ababa SubCities & Neighborhoods on startup
+await callbet.Infrastructure.Persistence.DbInitializer.SeedLocationDataAsync(app.Services);
 
 app.Run();
