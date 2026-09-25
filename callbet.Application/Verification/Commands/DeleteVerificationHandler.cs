@@ -8,6 +8,6 @@ public class DeleteVerificationHandler(IVerificationService service)
 {
     public async Task<Guid> Handle(DeleteVerificationCommand request, CancellationToken ct)
     {
-        return await service.DeleteVerificationAsync(request.RecordId, ct);
+        return await service.DeleteVerificationAsync(request.RecordId, request.AdminUserId, ct);
     }
 }

@@ -8,6 +8,6 @@ public class ApproveVerificationHandler(IVerificationService service)
 {
     public async Task<Guid> Handle(ApproveVerificationCommand request, CancellationToken ct)
     {
-        return await service.ApproveVerificationAsync(request.RecordId, ct);
+        return await service.ApproveVerificationAsync(request.RecordId, request.AdminUserId, ct);
     }
 }
