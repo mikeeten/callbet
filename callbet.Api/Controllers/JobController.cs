@@ -1,7 +1,9 @@
+using System.Security.Claims;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using callbet.Application.DTOs;
+using callbet.Application.Interfaces;
 using callbet.Application.Jobs.Commands;
 using callbet.Application.Jobs.Queries;
 
@@ -10,11 +12,50 @@ namespace callbet.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/job")]
-public class JobController(IMediator mediator) : ControllerBase
+public class JobController(IMediator mediator, IJobService jobService) : ControllerBase
 {
+    private Guid GetCurrentUserId()
+    {
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return Guid.TryParse(claim, out var userId) ? userId : Guid.Empty;
+    }
+
+    [HttpGet("my-jobs")]
+    public async Task<IActionResult> GetMyJobs(CancellationToken ct)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        if (User.IsInRole("Professional"))
+        {
+            var result = await jobService.GetJobsForProfessionalAsync(userId, ct);
+            return Ok(result);
+        }
+        else
+        {
+            var result = await jobService.GetJobsForCustomerAsync(userId, ct);
+            return Ok(result);
+        }
+    }
+
+    [HttpGet("my-payments")]
+    [HttpGet("my-earnings")]
+    public async Task<IActionResult> GetMyPayments(CancellationToken ct)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == Guid.Empty) return Unauthorized();
+
+        var result = await jobService.GetPaymentsForProfessionalAsync(userId, ct);
+        return Ok(result);
+    }
+
     [HttpPost("create")]
     public async Task<IActionResult> CreateJob([FromBody] JobDto dto)
     {
+        if (dto.CustomerId == Guid.Empty)
+        {
+            dto.CustomerId = GetCurrentUserId();
+        }
         var id = await mediator.Send(new CreateJobCommand(dto));
         return Ok(new { Message = "Job created", Id = id });
     }
@@ -40,6 +81,24 @@ public class JobController(IMediator mediator) : ControllerBase
         return Ok(new { Message = "Job completed, pending approval", Id = id });
     }
 
+    [HttpPut("cancel/{jobId}")]
+    public async Task<IActionResult> CancelJob(Guid jobId, CancellationToken ct)
+    {
+        var callerUserId = GetCurrentUserId();
+        var success = await jobService.CancelJobAsync(jobId, callerUserId, ct);
+        if (!success) return NotFound(new { Message = "Job not found or could not be cancelled." });
+        return Ok(new { Message = "Job cancelled successfully.", Success = true });
+    }
+
+    [HttpDelete("{jobId}")]
+    public async Task<IActionResult> DeleteJob(Guid jobId, CancellationToken ct)
+    {
+        var callerUserId = GetCurrentUserId();
+        var success = await jobService.DeleteJobAsync(jobId, callerUserId, ct);
+        if (!success) return NotFound(new { Message = "Job not found or could not be removed." });
+        return Ok(new { Message = "Job removed successfully.", Success = true });
+    }
+
     [HttpPut("close/{jobId}")]
     public async Task<IActionResult> CloseJob(Guid jobId)
     {
@@ -51,6 +110,13 @@ public class JobController(IMediator mediator) : ControllerBase
     public async Task<IActionResult> GetJobsForProfessional(Guid professionalId)
     {
         var result = await mediator.Send(new GetJobsForProfessionalQuery(professionalId));
+        return Ok(result);
+    }
+
+    [HttpGet("customer/{customerId}")]
+    public async Task<IActionResult> GetJobsForCustomer(Guid customerId, CancellationToken ct)
+    {
+        var result = await jobService.GetJobsForCustomerAsync(customerId, ct);
         return Ok(result);
     }
 
@@ -85,6 +151,10 @@ public class JobController(IMediator mediator) : ControllerBase
     [HttpPost("review")]
     public async Task<IActionResult> CreateReview([FromBody] ReviewDto dto)
     {
+        if (dto.ReviewerId == Guid.Empty)
+        {
+            dto.ReviewerId = GetCurrentUserId();
+        }
         var id = await mediator.Send(new CreateReviewCommand(dto));
         return Ok(new { Message = "Review created", Id = id });
     }
@@ -92,6 +162,10 @@ public class JobController(IMediator mediator) : ControllerBase
     [HttpPost("review/reply")]
     public async Task<IActionResult> ReplyToReview([FromBody] ReviewReplyDto dto)
     {
+        if (dto.ReplierId == Guid.Empty)
+        {
+            dto.ReplierId = GetCurrentUserId();
+        }
         var id = await mediator.Send(new ReplyToReviewCommand(dto));
         return Ok(new { Message = "Reply added", Id = id });
     }
