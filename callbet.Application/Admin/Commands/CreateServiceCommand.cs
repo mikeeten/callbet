@@ -3,4 +3,4 @@ using callbet.Application.DTOs;
 
 namespace callbet.Application.Admin.Commands;
 
-public record CreateServiceCommand(ServiceDto Dto) : IRequest<Guid>;
+public record CreateServiceCommand(ServiceDto Dto, Guid AdminUserId = default) : IRequest<Guid>;

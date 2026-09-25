@@ -8,6 +8,6 @@ public class CreateServiceHandler(IAdminService adminService)
 {
     public async Task<Guid> Handle(CreateServiceCommand request, CancellationToken ct)
     {
-        return await adminService.CreateServiceAsync(request.Dto, ct);
+        return await adminService.CreateServiceAsync(request.Dto, request.AdminUserId, ct);
     }
 }

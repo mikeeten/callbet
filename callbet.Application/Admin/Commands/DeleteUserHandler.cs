@@ -8,6 +8,6 @@ public class DeleteUserHandler(IAdminService adminService)
 {
     public async Task<Guid> Handle(DeleteUserCommand request, CancellationToken ct)
     {
-        return await adminService.DeleteUserAsync(request.UserId, ct);
+        return await adminService.DeleteUserAsync(request.UserId, request.AdminUserId, ct);
     }
 }

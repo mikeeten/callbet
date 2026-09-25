@@ -8,6 +8,6 @@ public class CreateServiceCategoryHandler(IAdminService adminService)
 {
     public async Task<Guid> Handle(CreateServiceCategoryCommand request, CancellationToken ct)
     {
-        return await adminService.CreateServiceCategoryAsync(request.Dto, ct);
+        return await adminService.CreateServiceCategoryAsync(request.Dto, request.AdminUserId, ct);
     }
 }

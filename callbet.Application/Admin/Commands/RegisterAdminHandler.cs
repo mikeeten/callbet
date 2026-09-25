@@ -8,6 +8,6 @@ public class RegisterAdminHandler(IAdminService adminService)
 {
     public async Task<Guid> Handle(RegisterAdminCommand request, CancellationToken ct)
     {
-        return await adminService.RegisterAdminAsync(request.Dto, ct);
+        return await adminService.RegisterAdminAsync(request.Dto, request.AdminUserId, ct);
     }
 }

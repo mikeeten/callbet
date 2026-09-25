@@ -8,6 +8,6 @@ public class ApproveProfessionalHandler(IAdminService adminService)
 {
     public async Task<Guid> Handle(ApproveProfessionalCommand request, CancellationToken ct)
     {
-        return await adminService.ApproveProfessionalAsync(request.UserId, ct);
+        return await adminService.ApproveProfessionalAsync(request.UserId, request.AdminUserId, ct);
     }
 }

@@ -8,6 +8,6 @@ public class AssignServiceHandler(IAdminService adminService)
 {
     public async Task<Guid> Handle(AssignServiceCommand request, CancellationToken ct)
     {
-        return await adminService.AssignServiceAsync(request.Dto, ct);
+        return await adminService.AssignServiceAsync(request.Dto, request.AdminUserId, ct);
     }
 }

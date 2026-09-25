@@ -8,6 +8,6 @@ public class SuspendProfessionalHandler(IAdminService adminService)
 {
     public async Task<Guid> Handle(SuspendProfessionalCommand request, CancellationToken ct)
     {
-        return await adminService.SuspendProfessionalAsync(request.UserId, ct);
+        return await adminService.SuspendProfessionalAsync(request.UserId, request.AdminUserId, ct);
     }
 }
