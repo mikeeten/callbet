@@ -34,11 +34,13 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
         var existing = await context.ProfessionalProfiles
             .FirstOrDefaultAsync(p => p.UserId == dto.UserId, ct);
 
+        int radius = (int)Math.Max(1, Math.Round(dto.ServiceRadiusKm > 0 ? dto.ServiceRadiusKm : 15));
+
         if (existing != null)
         {
             existing.Headline = dto.Headline;
             existing.Bio = dto.Bio;
-            existing.ServiceRadiusKm = dto.ServiceRadiusKm;
+            existing.ServiceRadiusKm = radius;
             existing.YearsOfExperience = dto.YearsOfExperience;
             existing.UpdatedAt = DateTime.UtcNow;
             await context.SaveChangesAsync(ct);
@@ -51,7 +53,7 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
             UserId = dto.UserId,
             Headline = dto.Headline,
             Bio = dto.Bio,
-            ServiceRadiusKm = dto.ServiceRadiusKm,
+            ServiceRadiusKm = radius,
             YearsOfExperience = dto.YearsOfExperience,
             OverallRating = dto.OverallRating,
             CompletedJobsCount = dto.CompletedJobsCount,
@@ -103,14 +105,24 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
 
     public async Task<Guid> AddCertificateAsync(CertificateDto dto, CancellationToken ct)
     {
+        var issueDate = dto.IssueDate.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(dto.IssueDate, DateTimeKind.Utc)
+            : dto.IssueDate.ToUniversalTime();
+
+        DateTime? expiryDate = dto.ExpiryDate.HasValue
+            ? (dto.ExpiryDate.Value.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(dto.ExpiryDate.Value, DateTimeKind.Utc)
+                : dto.ExpiryDate.Value.ToUniversalTime())
+            : null;
+
         var certificate = new Certificate
         {
             Id = Guid.NewGuid(),
             ProfessionalProfileId = dto.ProfessionalProfileId,
             Title = dto.Title,
             Organization = dto.Organization,
-            IssueDate = dto.IssueDate,
-            ExpiryDate = dto.ExpiryDate,
+            IssueDate = issueDate,
+            ExpiryDate = expiryDate,
             DocumentImageUrl = dto.DocumentImageUrl
         };
 
@@ -121,6 +133,10 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
 
     public async Task<Guid> AddPortfolioItemAsync(PortfolioItemDto dto, CancellationToken ct)
     {
+        var dateCompleted = dto.DateCompleted.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(dto.DateCompleted, DateTimeKind.Utc)
+            : dto.DateCompleted.ToUniversalTime();
+
         var item = new PortfolioItem
         {
             Id = Guid.NewGuid(),
@@ -128,7 +144,7 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
             Title = dto.Title,
             Description = dto.Description,
             ImageUrl = dto.ImageUrl,
-            DateCompleted = dto.DateCompleted
+            DateCompleted = dateCompleted
         };
 
         context.PortfolioItems.Add(item);
@@ -138,6 +154,17 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
 
     public async Task<Guid> AssignServiceAsync(ProfessionalServiceDto dto, CancellationToken ct)
     {
+        var existing = await context.ProfessionalServices
+            .FirstOrDefaultAsync(ps => ps.ProfessionalProfileId == dto.ProfessionalProfileId && ps.ServiceId == dto.ServiceId, ct);
+
+        if (existing != null)
+        {
+            existing.CustomPrice = dto.CustomPrice;
+            existing.ExperienceYears = dto.ExperienceYears;
+            await context.SaveChangesAsync(ct);
+            return existing.Id;
+        }
+
         var ps = new callbet.Domain.Entities.ProfessionalService
         {
             Id = Guid.NewGuid(),
@@ -152,18 +179,52 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
         return ps.Id;
     }
 
+    public async Task<bool> UnassignServiceAsync(Guid professionalProfileId, Guid serviceId, CancellationToken ct = default)
+    {
+        var item = await context.ProfessionalServices
+            .FirstOrDefaultAsync(ps => (ps.ProfessionalProfileId == professionalProfileId || ps.ProfessionalProfile.UserId == professionalProfileId)
+                                    && (ps.ServiceId == serviceId || ps.Id == serviceId), ct);
+        if (item == null) return false;
+
+        context.ProfessionalServices.Remove(item);
+        await context.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<IEnumerable<object>> GetProfessionalServicesAsync(Guid profileId, CancellationToken ct)
     {
         return await context.ProfessionalServices
-            .Where(ps => ps.ProfessionalProfileId == profileId)
-            .Join(context.Services,
-                  ps => ps.ServiceId,
-                  s => s.Id,
-                  (ps, s) => new {
-                      s.Name,
-                      ps.CustomPrice,
-                      ps.ExperienceYears
-                  })
+            .AsNoTracking()
+            .Where(ps => ps.ProfessionalProfileId == profileId || ps.ProfessionalProfile.UserId == profileId)
+            .Include(ps => ps.Service)
+                .ThenInclude(s => s.Category)
+            .Include(ps => ps.ProfessionalProfile)
+                .ThenInclude(p => p.User)
+            .Select(ps => new ProfessionalProfileServiceDto
+            {
+                Id = ps.Id,
+                ProfessionalProfileId = ps.ProfessionalProfileId,
+                UserId = ps.ProfessionalProfile.UserId,
+                ProfessionalName = ps.ProfessionalProfile.User.FirstName + " " + ps.ProfessionalProfile.User.LastName,
+                ProfessionalHeadline = ps.ProfessionalProfile.Headline,
+                ProfilePhotoUrl = ps.ProfessionalProfile.User.ProfilePhotoUrl,
+                OverallRating = ps.ProfessionalProfile.OverallRating,
+                CompletedJobsCount = ps.ProfessionalProfile.CompletedJobsCount,
+                IsVerified = ps.ProfessionalProfile.IsVerified,
+                ProfessionalExperienceYears = ps.ProfessionalProfile.YearsOfExperience,
+                ServiceId = ps.ServiceId,
+                ServiceName = ps.Service.Name,
+                ServiceDescription = ps.Service.Description,
+                PricingType = ps.Service.PricingType,
+                BasePrice = ps.Service.BasePrice,
+                CustomPrice = ps.CustomPrice,
+                EffectivePrice = ps.CustomPrice ?? ps.Service.BasePrice ?? 0m,
+                EstimatedDurationMins = ps.Service.EstimatedDurationMins,
+                ServiceExperienceYears = ps.ExperienceYears,
+                CategoryId = ps.Service.CategoryId,
+                CategoryName = ps.Service.Category.Name,
+                CategoryIconUrl = ps.Service.Category.IconUrl
+            })
             .ToListAsync(ct);
     }
 
@@ -242,10 +303,7 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
             .Include(p => p.Resume)
             .Include(p => p.Certificates)
             .Include(p => p.AvailabilitySchedules)
-            .Include(p => p.Services)
-                .ThenInclude(ps => ps.Service)
-                    .ThenInclude(s => s.Category)
-            .FirstOrDefaultAsync(p => p.Id == id || p.UserId == id || p.Services.Any(ps => ps.Id == id), ct);
+            .FirstOrDefaultAsync(p => p.Id == id || p.UserId == id, ct);
 
         if (profile == null) return null;
 
@@ -289,14 +347,42 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync(ct);
 
+        var addresses = await context.Addresses
+            .Include(a => a.Neighborhood)
+                .ThenInclude(n => n!.SubCity)
+            .Where(a => a.UserId == profile.UserId)
+            .OrderByDescending(a => a.CreatedAt)
+            .Select(a => new AddressDto
+            {
+                Id = a.Id,
+                UserId = a.UserId,
+                NeighborhoodId = a.NeighborhoodId,
+                NeighborhoodName = a.Neighborhood != null ? a.Neighborhood.Name : null,
+                SubCityId = a.Neighborhood != null ? a.Neighborhood.SubCityId : null,
+                SubCityName = a.Neighborhood != null && a.Neighborhood.SubCity != null ? a.Neighborhood.SubCity.Name : null,
+                Label = a.Label,
+                Landmark = a.Landmark,
+                PrimaryPhone = a.PrimaryPhone,
+                Street = a.Street,
+                City = a.City,
+                Country = a.Country,
+                Latitude = a.Latitude,
+                Longitude = a.Longitude,
+                CreatedAt = a.CreatedAt,
+                UpdatedAt = a.UpdatedAt
+            })
+            .ToListAsync(ct);
+
+        var baseAddress = addresses.FirstOrDefault();
+
         return new ProfessionalProfileDetailsDto
         {
             Id = profile.Id,
             UserId = profile.UserId,
-            FullName = profile.User.FirstName + " " + profile.User.LastName,
-            Email = profile.User.Email,
-            Phone = profile.User.Phone,
-            ProfilePhotoUrl = profile.User.ProfilePhotoUrl,
+            FullName = profile.User != null ? (profile.User.FirstName + " " + profile.User.LastName).Trim() : "Professional",
+            Email = profile.User?.Email ?? string.Empty,
+            Phone = profile.User?.Phone ?? string.Empty,
+            ProfilePhotoUrl = profile.User?.ProfilePhotoUrl,
             Headline = profile.Headline,
             Bio = profile.Bio,
             ServiceRadiusKm = profile.ServiceRadiusKm,
@@ -304,6 +390,8 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
             OverallRating = profile.OverallRating,
             CompletedJobsCount = profile.CompletedJobsCount,
             IsVerified = profile.IsVerified,
+            BaseAddress = baseAddress,
+            Addresses = addresses,
             Resume = profile.Resume == null ? null : new ResumeDto
             {
                 Id = profile.Resume.Id,
@@ -315,7 +403,7 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
                 Languages = profile.Resume.Languages,
                 ResumeFileUrl = profile.Resume.ResumeFileUrl
             },
-            Certificates = profile.Certificates.Select(c => new CertificateDto
+            Certificates = profile.Certificates != null ? profile.Certificates.Select(c => new CertificateDto
             {
                 Id = c.Id,
                 ProfessionalProfileId = c.ProfessionalProfileId,
@@ -324,42 +412,182 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
                 IssueDate = c.IssueDate,
                 ExpiryDate = c.ExpiryDate,
                 DocumentImageUrl = c.DocumentImageUrl
-            }).ToList(),
-            PortfolioItems = portfolioItems,
-            Services = profile.Services.Select(ps => new ProfessionalProfileServiceDto
-            {
-                Id = ps.Id,
-                ProfessionalProfileId = ps.ProfessionalProfileId,
-                UserId = profile.UserId,
-                ProfessionalName = profile.User.FirstName + " " + profile.User.LastName,
-                ProfessionalHeadline = profile.Headline,
-                ProfilePhotoUrl = profile.User.ProfilePhotoUrl,
-                OverallRating = profile.OverallRating,
-                CompletedJobsCount = profile.CompletedJobsCount,
-                IsVerified = profile.IsVerified,
-                ProfessionalExperienceYears = profile.YearsOfExperience,
-                ServiceId = ps.ServiceId,
-                ServiceName = ps.Service.Name,
-                ServiceDescription = ps.Service.Description,
-                PricingType = ps.Service.PricingType,
-                BasePrice = ps.Service.BasePrice,
-                CustomPrice = ps.CustomPrice,
-                EffectivePrice = ps.CustomPrice ?? ps.Service.BasePrice ?? 0m,
-                EstimatedDurationMins = ps.Service.EstimatedDurationMins,
-                ServiceExperienceYears = ps.ExperienceYears,
-                CategoryId = ps.Service.CategoryId,
-                CategoryName = ps.Service.Category.Name,
-                CategoryIconUrl = ps.Service.Category.IconUrl
-            }).ToList(),
-            AvailabilitySchedules = profile.AvailabilitySchedules.Select(s => new AvailabilityScheduleDto
+            }).ToList() : new List<CertificateDto>(),
+            PortfolioItems = portfolioItems ?? new List<PortfolioItemDto>(),
+            AvailabilitySchedules = profile.AvailabilitySchedules != null ? profile.AvailabilitySchedules.Select(s => new AvailabilityScheduleDto
             {
                 Id = s.Id,
                 ProfessionalProfileId = s.ProfessionalProfileId,
                 DayOfWeek = s.DayOfWeek,
                 StartTime = s.StartTime,
                 EndTime = s.EndTime
-            }).OrderBy(s => s.DayOfWeek).ThenBy(s => s.StartTime).ToList(),
-            Reviews = reviews
+            }).OrderBy(s => s.DayOfWeek).ThenBy(s => s.StartTime).ToList() : new List<AvailabilityScheduleDto>(),
+            Reviews = reviews ?? new List<ReviewDto>()
         };
+    }
+
+    public async Task<GetProfessionalProfileDashboardDto?> GetProfessionalProfileDashboardAsync(Guid id, CancellationToken ct)
+    {
+        var profile = await context.ProfessionalProfiles
+            .Include(p => p.User)
+            .Include(p => p.Resume)
+            .Include(p => p.Certificates)
+            .Include(p => p.AvailabilitySchedules)
+            .FirstOrDefaultAsync(p => p.Id == id || p.UserId == id, ct);
+
+        if (profile == null) return null;
+
+        var portfolioItems = await context.PortfolioItems
+            .Where(pi => pi.ProfessionalProfileId == profile.Id)
+            .Select(pi => new PortfolioItemDto
+            {
+                Id = pi.Id,
+                ProfessionalProfileId = pi.ProfessionalProfileId,
+                Title = pi.Title,
+                Description = pi.Description,
+                ImageUrl = pi.ImageUrl,
+                DateCompleted = pi.DateCompleted
+            })
+            .ToListAsync(ct);
+
+        var reviews = await context.Reviews
+            .Where(r => r.RevieweeId == profile.UserId)
+            .Join(context.Users,
+                  r => r.ReviewerId,
+                  u => u.Id,
+                  (r, u) => new ReviewDto
+                  {
+                      Id = r.Id,
+                      JobId = r.JobId,
+                      ReviewerId = r.ReviewerId,
+                      RevieweeId = r.RevieweeId,
+                      Rating = r.Rating,
+                      Comment = r.Comment,
+                      CustomerName = u.FirstName + " " + u.LastName,
+                      CreatedAt = r.CreatedAt,
+                      Reply = r.Reply == null ? null : new ReviewReplyDto
+                      {
+                          Id = r.Reply.Id,
+                          ReviewId = r.Reply.ReviewId,
+                          ReplierId = r.Reply.ReplierId,
+                          Comment = r.Reply.Comment,
+                          CreatedAt = r.Reply.CreatedAt
+                      }
+                  })
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync(ct);
+
+        var addresses = await context.Addresses
+            .Include(a => a.Neighborhood)
+                .ThenInclude(n => n!.SubCity)
+            .Where(a => a.UserId == profile.UserId)
+            .OrderByDescending(a => a.CreatedAt)
+            .Select(a => new AddressDto
+            {
+                Id = a.Id,
+                UserId = a.UserId,
+                NeighborhoodId = a.NeighborhoodId,
+                NeighborhoodName = a.Neighborhood != null ? a.Neighborhood.Name : null,
+                SubCityId = a.Neighborhood != null ? a.Neighborhood.SubCityId : null,
+                SubCityName = a.Neighborhood != null && a.Neighborhood.SubCity != null ? a.Neighborhood.SubCity.Name : null,
+                Label = a.Label,
+                Landmark = a.Landmark,
+                PrimaryPhone = a.PrimaryPhone,
+                Street = a.Street,
+                City = a.City,
+                Country = a.Country,
+                Latitude = a.Latitude,
+                Longitude = a.Longitude,
+                CreatedAt = a.CreatedAt,
+                UpdatedAt = a.UpdatedAt
+            })
+            .ToListAsync(ct);
+
+        var baseAddress = addresses.FirstOrDefault();
+
+        return new GetProfessionalProfileDashboardDto
+        {
+            Id = profile.Id,
+            UserId = profile.UserId,
+            FullName = profile.User != null ? (profile.User.FirstName + " " + profile.User.LastName).Trim() : "Professional",
+            Email = profile.User?.Email ?? string.Empty,
+            Phone = profile.User?.Phone ?? string.Empty,
+            ProfilePhotoUrl = profile.User?.ProfilePhotoUrl,
+            Headline = profile.Headline,
+            Bio = profile.Bio,
+            ServiceRadiusKm = profile.ServiceRadiusKm,
+            YearsOfExperience = profile.YearsOfExperience,
+            OverallRating = profile.OverallRating,
+            CompletedJobsCount = profile.CompletedJobsCount,
+            IsVerified = profile.IsVerified,
+            CreatedAt = profile.CreatedAt,
+            UpdatedAt = profile.UpdatedAt,
+            BaseAddress = baseAddress,
+            Addresses = addresses,
+            Resume = profile.Resume == null ? null : new ResumeDto
+            {
+                Id = profile.Resume.Id,
+                ProfessionalProfileId = profile.Resume.ProfessionalProfileId,
+                Summary = profile.Resume.Summary,
+                EducationJson = profile.Resume.EducationJson,
+                ExperienceJson = profile.Resume.ExperienceJson,
+                Skills = profile.Resume.Skills,
+                Languages = profile.Resume.Languages,
+                ResumeFileUrl = profile.Resume.ResumeFileUrl
+            },
+            Certificates = profile.Certificates != null ? profile.Certificates.Select(c => new CertificateDto
+            {
+                Id = c.Id,
+                ProfessionalProfileId = c.ProfessionalProfileId,
+                Title = c.Title,
+                Organization = c.Organization,
+                IssueDate = c.IssueDate,
+                ExpiryDate = c.ExpiryDate,
+                DocumentImageUrl = c.DocumentImageUrl
+            }).ToList() : new List<CertificateDto>(),
+            PortfolioItems = portfolioItems ?? new List<PortfolioItemDto>(),
+            AvailabilitySchedules = profile.AvailabilitySchedules != null ? profile.AvailabilitySchedules.Select(s => new AvailabilityScheduleDto
+            {
+                Id = s.Id,
+                ProfessionalProfileId = s.ProfessionalProfileId,
+                DayOfWeek = s.DayOfWeek,
+                StartTime = s.StartTime,
+                EndTime = s.EndTime
+            }).OrderBy(s => s.DayOfWeek).ThenBy(s => s.StartTime).ToList() : new List<AvailabilityScheduleDto>(),
+            Reviews = reviews ?? new List<ReviewDto>()
+        };
+    }
+
+    public async Task<bool> DeleteAvailabilityScheduleAsync(Guid professionalProfileId, Guid scheduleId, CancellationToken ct = default)
+    {
+        var item = await context.AvailabilitySchedules
+            .FirstOrDefaultAsync(s => s.Id == scheduleId && (s.ProfessionalProfileId == professionalProfileId || s.ProfessionalProfile.UserId == professionalProfileId), ct);
+        if (item == null) return false;
+
+        context.AvailabilitySchedules.Remove(item);
+        await context.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> DeleteCertificateAsync(Guid professionalProfileId, Guid certificateId, CancellationToken ct)
+    {
+        var item = await context.Certificates
+            .FirstOrDefaultAsync(c => c.Id == certificateId && (c.ProfessionalProfileId == professionalProfileId || c.ProfessionalProfile.UserId == professionalProfileId), ct);
+        if (item == null) return false;
+
+        context.Certificates.Remove(item);
+        await context.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> DeletePortfolioItemAsync(Guid professionalProfileId, Guid portfolioItemId, CancellationToken ct)
+    {
+        var item = await context.PortfolioItems
+            .FirstOrDefaultAsync(pi => pi.Id == portfolioItemId && pi.ProfessionalProfileId == professionalProfileId, ct);
+        if (item == null) return false;
+
+        context.PortfolioItems.Remove(item);
+        await context.SaveChangesAsync(ct);
+        return true;
     }
 }
