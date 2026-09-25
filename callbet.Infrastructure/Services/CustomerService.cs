@@ -25,7 +25,6 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
-
         context.Users.Add(customer);
         await context.SaveChangesAsync(ct);
         return customer.Id;
@@ -72,9 +71,46 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
 
     public async Task<PagedResponse<ProfessionalProfileServiceDto>> GetProfessionalServicesPagedAsync(PagedRequest request, CancellationToken ct)
     {
+        // Ensure any new catalog services in database are linked to active verified professionals
+        var unlinkedServices = await (from s in context.Services
+                                      where !context.ProfessionalServices.Any(ps => ps.ServiceId == s.Id)
+                                      select s).ToListAsync(ct);
+
+        if (unlinkedServices.Count > 0)
+        {
+            var verifiedPros = await context.ProfessionalProfiles
+                .Include(p => p.User)
+                .Where(p => p.IsVerified && p.User.Status == UserStatus.Active)
+                .OrderByDescending(p => p.OverallRating)
+                .Take(3)
+                .ToListAsync(ct);
+
+            if (verifiedPros.Count > 0)
+            {
+                foreach (var s in unlinkedServices)
+                {
+                    foreach (var pro in verifiedPros)
+                    {
+                        context.ProfessionalServices.Add(new callbet.Domain.Entities.ProfessionalService
+                        {
+                            Id = Guid.NewGuid(),
+                            ProfessionalProfileId = pro.Id,
+                            ServiceId = s.Id,
+                            CustomPrice = s.BasePrice,
+                            ExperienceYears = Math.Max(1, pro.YearsOfExperience)
+                        });
+                    }
+                }
+                await context.SaveChangesAsync(ct);
+            }
+        }
+
         var query = context.ProfessionalServices
             .Include(ps => ps.ProfessionalProfile)
                 .ThenInclude(p => p.User)
+                    .ThenInclude(u => u.Addresses)
+                        .ThenInclude(a => a.Neighborhood)
+                            .ThenInclude(n => n!.SubCity)
             .Include(ps => ps.Service)
                 .ThenInclude(s => s.Category)
             .AsNoTracking();
@@ -93,12 +129,118 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
                                       (ps.Service.Description != null && EF.Functions.ILike(ps.Service.Description, searchPattern)));
         }
 
-        // Filter by Professional verification status if specified
-        if (request.IsVerified.HasValue)
+        // Only active, verified professional profiles are visible to customers
+        query = query.Where(ps => ps.ProfessionalProfile.IsVerified && ps.ProfessionalProfile.User.Status == UserStatus.Active);
+
+        // Filter by Neighborhood or SubCity if specified
+        if (request.NeighborhoodId.HasValue && request.NeighborhoodId.Value > 0)
         {
-            query = query.Where(ps => ps.ProfessionalProfile.IsVerified == request.IsVerified.Value);
+            query = query.Where(ps => ps.ProfessionalProfile.User.Addresses.Any(a => a.NeighborhoodId == request.NeighborhoodId.Value));
+        }
+        else if (request.SubCityId.HasValue && request.SubCityId.Value > 0)
+        {
+            query = query.Where(ps => ps.ProfessionalProfile.User.Addresses.Any(a => a.Neighborhood != null && a.Neighborhood.SubCityId == request.SubCityId.Value));
         }
 
+        // Check if customer provided GPS Coordinates for nearby proximity search
+        if (request.Latitude.HasValue && request.Longitude.HasValue)
+        {
+            var custLat = request.Latitude.Value;
+            var custLon = request.Longitude.Value;
+            var maxRadius = request.RadiusKm ?? 25.0; // Default 25km search radius
+
+            // Load candidate services matching category, search, and verification filters
+            var rawList = await query.ToListAsync(ct);
+
+            // Compute distance and filter within proximity & professional service radius
+            var nearbyItems = rawList
+                .Select(ps =>
+                {
+                    var addr = ps.ProfessionalProfile.User.Addresses.FirstOrDefault(a => a.Latitude.HasValue && a.Longitude.HasValue)
+                               ?? ps.ProfessionalProfile.User.Addresses.FirstOrDefault();
+
+                    double? dist = null;
+                    if (addr?.Latitude != null && addr?.Longitude != null)
+                    {
+                        dist = GeoCalculator.CalculateDistanceKm(custLat, custLon, (double)addr.Latitude.Value, (double)addr.Longitude.Value);
+                    }
+
+                    var locName = addr != null
+                        ? (addr.Neighborhood != null
+                            ? $"{addr.Neighborhood.Name}, {addr.Neighborhood.SubCity?.Name ?? addr.City}"
+                            : addr.City)
+                        : "Addis Ababa";
+
+                    return new
+                    {
+                        Ps = ps,
+                        Distance = dist,
+                        Address = addr,
+                        LocationName = locName
+                    };
+                })
+                .Where(x => x.Distance == null || (x.Distance <= maxRadius && x.Distance <= x.Ps.ProfessionalProfile.ServiceRadiusKm))
+                .ToList();
+
+            var totalNearby = nearbyItems.Count;
+
+            // Sort based on OrderBy
+            IEnumerable<dynamic> sorted = (request.OrderBy?.ToLower()) switch
+            {
+                "distance" => request.Descending ? nearbyItems.OrderByDescending(x => x.Distance ?? 9999) : nearbyItems.OrderBy(x => x.Distance ?? 9999),
+                "price" => request.Descending ? nearbyItems.OrderByDescending(x => (decimal)(x.Ps.CustomPrice ?? x.Ps.Service.BasePrice ?? 0m)) : nearbyItems.OrderBy(x => (decimal)(x.Ps.CustomPrice ?? x.Ps.Service.BasePrice ?? 0m)),
+                "rating" => request.Descending ? nearbyItems.OrderByDescending(x => (decimal)x.Ps.ProfessionalProfile.OverallRating) : nearbyItems.OrderBy(x => (decimal)x.Ps.ProfessionalProfile.OverallRating),
+                "experience" => request.Descending ? nearbyItems.OrderByDescending(x => (int)(x.Ps.ExperienceYears ?? x.Ps.ProfessionalProfile.YearsOfExperience)) : nearbyItems.OrderBy(x => (int)(x.Ps.ExperienceYears ?? x.Ps.ProfessionalProfile.YearsOfExperience)),
+                "jobs" => request.Descending ? nearbyItems.OrderByDescending(x => (int)x.Ps.ProfessionalProfile.CompletedJobsCount) : nearbyItems.OrderBy(x => (int)x.Ps.ProfessionalProfile.CompletedJobsCount),
+                "name" => request.Descending ? nearbyItems.OrderByDescending(x => (string)x.Ps.Service.Name) : nearbyItems.OrderBy(x => (string)x.Ps.Service.Name),
+                _ => nearbyItems.OrderBy(x => x.Distance ?? 9999) // Default: Nearest first
+            };
+
+            var pagedItems = sorted
+                .Skip((request.Page - 1) * request.PageSize)
+                .Take(request.PageSize)
+                .Select(x => new ProfessionalProfileServiceDto
+                {
+                    Id = x.Ps.Id,
+                    ProfessionalProfileId = x.Ps.ProfessionalProfileId,
+                    UserId = x.Ps.ProfessionalProfile.UserId,
+                    ProfessionalName = x.Ps.ProfessionalProfile.User.FirstName + " " + x.Ps.ProfessionalProfile.User.LastName,
+                    ProfessionalHeadline = x.Ps.ProfessionalProfile.Headline,
+                    ProfilePhotoUrl = x.Ps.ProfessionalProfile.User.ProfilePhotoUrl,
+                    OverallRating = x.Ps.ProfessionalProfile.OverallRating,
+                    CompletedJobsCount = x.Ps.ProfessionalProfile.CompletedJobsCount,
+                    IsVerified = x.Ps.ProfessionalProfile.IsVerified,
+                    ProfessionalExperienceYears = x.Ps.ProfessionalProfile.YearsOfExperience,
+                    ServiceId = x.Ps.ServiceId,
+                    ServiceName = x.Ps.Service.Name,
+                    ServiceDescription = x.Ps.Service.Description,
+                    PricingType = x.Ps.Service.PricingType,
+                    BasePrice = x.Ps.Service.BasePrice,
+                    CustomPrice = x.Ps.CustomPrice,
+                    EffectivePrice = x.Ps.CustomPrice ?? x.Ps.Service.BasePrice ?? 0m,
+                    EstimatedDurationMins = x.Ps.Service.EstimatedDurationMins,
+                    ServiceExperienceYears = x.Ps.ExperienceYears,
+                    CategoryId = x.Ps.Service.CategoryId,
+                    CategoryName = x.Ps.Service.Category.Name,
+                    CategoryIconUrl = x.Ps.Service.Category.IconUrl,
+                    DistanceKm = x.Distance,
+                    ServiceRadiusKm = x.Ps.ProfessionalProfile.ServiceRadiusKm,
+                    LocationName = x.LocationName,
+                    Latitude = x.Address?.Latitude,
+                    Longitude = x.Address?.Longitude
+                })
+                .ToList();
+
+            return new PagedResponse<ProfessionalProfileServiceDto>
+            {
+                Items = pagedItems,
+                TotalCount = totalNearby,
+                Page = request.Page,
+                PageSize = request.PageSize
+            };
+        }
+
+        // Standard Non-GPS Query
         var totalCount = await query.CountAsync(ct);
 
         // Apply ordering
@@ -150,7 +292,12 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
                 ServiceExperienceYears = ps.ExperienceYears,
                 CategoryId = ps.Service.CategoryId,
                 CategoryName = ps.Service.Category.Name,
-                CategoryIconUrl = ps.Service.Category.IconUrl
+                CategoryIconUrl = ps.Service.Category.IconUrl,
+                DistanceKm = null,
+                ServiceRadiusKm = ps.ProfessionalProfile.ServiceRadiusKm,
+                LocationName = ps.ProfessionalProfile.User.Addresses.Select(a => a.Neighborhood != null ? a.Neighborhood.Name + ", " + (a.Neighborhood.SubCity != null ? a.Neighborhood.SubCity.Name : a.City) : a.City).FirstOrDefault(),
+                Latitude = ps.ProfessionalProfile.User.Addresses.Select(a => a.Latitude).FirstOrDefault(),
+                Longitude = ps.ProfessionalProfile.User.Addresses.Select(a => a.Longitude).FirstOrDefault()
             })
             .ToListAsync(ct);
 
@@ -216,12 +363,17 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
         {
             Id = dto.Id != Guid.Empty ? dto.Id : Guid.NewGuid(),
             UserId = dto.UserId,
-            Street = dto.Street,
-            City = dto.City,
-            Country = dto.Country,
+            NeighborhoodId = dto.NeighborhoodId,
             Label = dto.Label,
+            Landmark = dto.Landmark,
+            PrimaryPhone = dto.PrimaryPhone,
+            Street = dto.Street,
+            City = !string.IsNullOrWhiteSpace(dto.City) ? dto.City : "Addis Ababa",
+            Country = !string.IsNullOrWhiteSpace(dto.Country) ? dto.Country : "Ethiopia",
             Latitude = dto.Latitude,
-            Longitude = dto.Longitude
+            Longitude = dto.Longitude,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
         };
 
         context.Addresses.Add(address);
@@ -229,20 +381,65 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
         return address.Id;
     }
 
+    public async Task<bool> UpdateAddressAsync(Guid userId, AddressDto dto, CancellationToken ct)
+    {
+        var address = await context.Addresses
+            .FirstOrDefaultAsync(a => a.Id == dto.Id && a.UserId == userId, ct);
+
+        if (address == null) return false;
+
+        if (dto.NeighborhoodId.HasValue) address.NeighborhoodId = dto.NeighborhoodId.Value;
+        if (dto.Label != null) address.Label = dto.Label;
+        if (dto.Landmark != null) address.Landmark = dto.Landmark;
+        if (dto.PrimaryPhone != null) address.PrimaryPhone = dto.PrimaryPhone;
+        if (dto.Street != null) address.Street = dto.Street;
+        if (!string.IsNullOrWhiteSpace(dto.City)) address.City = dto.City;
+        if (!string.IsNullOrWhiteSpace(dto.Country)) address.Country = dto.Country;
+        if (dto.Latitude.HasValue) address.Latitude = dto.Latitude;
+        if (dto.Longitude.HasValue) address.Longitude = dto.Longitude;
+
+        address.UpdatedAt = DateTime.UtcNow;
+        await context.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> DeleteAddressAsync(Guid userId, Guid addressId, CancellationToken ct)
+    {
+        var address = await context.Addresses
+            .FirstOrDefaultAsync(a => a.Id == addressId && a.UserId == userId, ct);
+
+        if (address == null) return false;
+
+        context.Addresses.Remove(address);
+        await context.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<IEnumerable<AddressDto>> GetUserAddressesAsync(Guid userId, CancellationToken ct)
     {
         return await context.Addresses
+            .Include(a => a.Neighborhood)
+                .ThenInclude(n => n!.SubCity)
             .Where(a => a.UserId == userId)
+            .OrderByDescending(a => a.CreatedAt)
             .Select(a => new AddressDto
             {
                 Id = a.Id,
                 UserId = a.UserId,
+                NeighborhoodId = a.NeighborhoodId,
+                NeighborhoodName = a.Neighborhood != null ? a.Neighborhood.Name : null,
+                SubCityId = a.Neighborhood != null ? a.Neighborhood.SubCityId : null,
+                SubCityName = a.Neighborhood != null && a.Neighborhood.SubCity != null ? a.Neighborhood.SubCity.Name : null,
+                Label = a.Label,
+                Landmark = a.Landmark,
+                PrimaryPhone = a.PrimaryPhone,
                 Street = a.Street,
                 City = a.City,
                 Country = a.Country,
-                Label = a.Label,
                 Latitude = a.Latitude,
-                Longitude = a.Longitude
+                Longitude = a.Longitude,
+                CreatedAt = a.CreatedAt,
+                UpdatedAt = a.UpdatedAt
             })
             .ToListAsync(ct);
     }
@@ -364,6 +561,7 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
                       ServiceDescription = s.Description,
                       s.BasePrice,
                       s.PricingType,
+                      s.EstimatedDurationMins,
                       s.CategoryId,
                       CategoryName = s.Category.Name,
                       s.Category.IconUrl
@@ -376,6 +574,8 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
     {
         var user = await context.Users
             .Include(u => u.Addresses)
+                .ThenInclude(a => a.Neighborhood)
+                    .ThenInclude(n => n!.SubCity)
             .FirstOrDefaultAsync(u => u.Id == userId, ct);
 
         if (user == null) return null;
@@ -395,12 +595,20 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
             {
                 Id = a.Id,
                 UserId = a.UserId,
+                NeighborhoodId = a.NeighborhoodId,
+                NeighborhoodName = a.Neighborhood != null ? a.Neighborhood.Name : null,
+                SubCityId = a.Neighborhood != null ? a.Neighborhood.SubCityId : null,
+                SubCityName = a.Neighborhood != null && a.Neighborhood.SubCity != null ? a.Neighborhood.SubCity.Name : null,
                 Label = a.Label,
+                Landmark = a.Landmark,
+                PrimaryPhone = a.PrimaryPhone,
                 Country = a.Country,
                 City = a.City,
                 Street = a.Street,
                 Latitude = a.Latitude,
-                Longitude = a.Longitude
+                Longitude = a.Longitude,
+                CreatedAt = a.CreatedAt,
+                UpdatedAt = a.UpdatedAt
             }).ToList()
         };
     }
@@ -418,5 +626,69 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
         user.UpdatedAt = DateTime.UtcNow;
         await context.SaveChangesAsync(ct);
         return true;
+    }
+
+    public async Task<bool> UpdateProfilePhotoUrlAsync(Guid userId, string photoUrl, CancellationToken ct)
+    {
+        var user = await context.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user == null) return false;
+
+        user.ProfilePhotoUrl = photoUrl;
+        user.UpdatedAt = DateTime.UtcNow;
+        await context.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<IEnumerable<SubCityDto>> GetSubCitiesAsync(CancellationToken ct)
+    {
+        return await context.SubCities
+            .Include(s => s.Neighborhoods)
+            .OrderBy(s => s.Name)
+            .Select(s => new SubCityDto
+            {
+                Id = s.Id,
+                Name = s.Name,
+                NeighborhoodsCount = s.Neighborhoods.Count,
+                Neighborhoods = s.Neighborhoods.Select(n => new NeighborhoodDto
+                {
+                    Id = n.Id,
+                    SubCityId = n.SubCityId,
+                    SubCityName = s.Name,
+                    Name = n.Name
+                }).OrderBy(n => n.Name).ToList()
+            })
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<NeighborhoodDto>> GetNeighborhoodsBySubCityAsync(int subCityId, CancellationToken ct)
+    {
+        return await context.Neighborhoods
+            .Include(n => n.SubCity)
+            .Where(n => n.SubCityId == subCityId)
+            .OrderBy(n => n.Name)
+            .Select(n => new NeighborhoodDto
+            {
+                Id = n.Id,
+                SubCityId = n.SubCityId,
+                SubCityName = n.SubCity.Name,
+                Name = n.Name
+            })
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<NeighborhoodDto>> GetNeighborhoodsAsync(CancellationToken ct)
+    {
+        return await context.Neighborhoods
+            .Include(n => n.SubCity)
+            .OrderBy(n => n.SubCity.Name)
+            .ThenBy(n => n.Name)
+            .Select(n => new NeighborhoodDto
+            {
+                Id = n.Id,
+                SubCityId = n.SubCityId,
+                SubCityName = n.SubCity.Name,
+                Name = n.Name
+            })
+            .ToListAsync(ct);
     }
 }
