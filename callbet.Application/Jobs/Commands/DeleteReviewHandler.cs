@@ -8,6 +8,6 @@ public class DeleteReviewHandler(IJobService jobService)
 {
     public async Task<bool> Handle(DeleteReviewCommand request, CancellationToken ct)
     {
-        return await jobService.DeleteReviewAsync(request.ReviewId, ct);
+        return await jobService.DeleteReviewAsync(request.ReviewId, request.AdminUserId, ct);
     }
 }
