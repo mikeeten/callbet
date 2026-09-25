@@ -8,6 +8,6 @@ public class DeleteChatMessageHandler(IChatNotificationService service)
 {
     public async Task<bool> Handle(DeleteChatMessageCommand request, CancellationToken ct)
     {
-        return await service.DeleteMessageAsync(request.MessageId, ct);
+        return await service.DeleteMessageAsync(request.MessageId, request.AdminUserId, ct);
     }
 }
