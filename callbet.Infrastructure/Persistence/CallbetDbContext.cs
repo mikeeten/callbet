@@ -12,6 +12,8 @@ public class CallbetDbContext : IdentityDbContext<User, IdentityRole<Guid>, Guid
     public DbSet<ProfessionalProfile> ProfessionalProfiles => Set<ProfessionalProfile>();
     public DbSet<Resume> Resumes => Set<Resume>();
     public DbSet<Certificate> Certificates => Set<Certificate>();
+    public DbSet<SubCity> SubCities => Set<SubCity>();
+    public DbSet<Neighborhood> Neighborhoods => Set<Neighborhood>();
     public DbSet<Address> Addresses => Set<Address>();
     public DbSet<ServiceCategory> ServiceCategories => Set<ServiceCategory>();
     public DbSet<Service> Services => Set<Service>();
