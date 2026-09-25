@@ -12,6 +12,8 @@ public interface ICustomerService
     Task<IEnumerable<Service>> GetServicesAsync(CancellationToken ct);
     Task<bool> VerifyPasswordAsync(string plainText, string hashed);
     Task<Guid> AddAddressAsync(AddressDto dto, CancellationToken ct);
+    Task<bool> UpdateAddressAsync(Guid userId, AddressDto dto, CancellationToken ct);
+    Task<bool> DeleteAddressAsync(Guid userId, Guid addressId, CancellationToken ct);
     Task<IEnumerable<AddressDto>> GetUserAddressesAsync(Guid userId, CancellationToken ct);
 
     // Favorites / Bookmarks
@@ -25,4 +27,10 @@ public interface ICustomerService
     // Customer Personal Profile Management
     Task<CustomerProfileDto?> GetCustomerProfileAsync(Guid userId, CancellationToken ct);
     Task<bool> UpdateCustomerProfileAsync(Guid userId, UpdateCustomerProfileDto dto, CancellationToken ct);
+    Task<bool> UpdateProfilePhotoUrlAsync(Guid userId, string photoUrl, CancellationToken ct);
+
+    // Location Hierarchy (SubCities & Neighborhoods)
+    Task<IEnumerable<SubCityDto>> GetSubCitiesAsync(CancellationToken ct);
+    Task<IEnumerable<NeighborhoodDto>> GetNeighborhoodsBySubCityAsync(int subCityId, CancellationToken ct);
+    Task<IEnumerable<NeighborhoodDto>> GetNeighborhoodsAsync(CancellationToken ct);
 }
