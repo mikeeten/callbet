@@ -13,7 +13,7 @@ namespace callbet.Application.DTOs
         public string? ProfilePhotoUrl { get; set; }
         public string? Headline { get; set; }
         public string? Bio { get; set; }
-        public int ServiceRadiusKm { get; set; }
+        public decimal ServiceRadiusKm { get; set; }
         public int YearsOfExperience { get; set; }
         public decimal OverallRating { get; set; }
         public int CompletedJobsCount { get; set; }
@@ -28,5 +28,6 @@ namespace callbet.Application.DTOs
         public IEnumerable<PortfolioItemDto> PortfolioItems { get; set; } = new List<PortfolioItemDto>();
         public IEnumerable<AvailabilityScheduleDto> AvailabilitySchedules { get; set; } = new List<AvailabilityScheduleDto>();
         public IEnumerable<ReviewDto> Reviews { get; set; } = new List<ReviewDto>();
+        public IEnumerable<VerificationItemDto> VerificationRecords { get; set; } = new List<VerificationItemDto>();
     }
 }
