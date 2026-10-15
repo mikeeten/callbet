@@ -11,5 +11,5 @@ public interface IChatNotificationService
     Task<bool> MarkNotificationAsReadAsync(Guid notificationId, Guid userId, CancellationToken ct);
     Task<bool> MarkMessageAsReadAsync(Guid messageId, Guid userId, CancellationToken ct);
     Task<bool> DeleteMessageAsync(Guid messageId, Guid adminUserId = default, CancellationToken ct = default);
-    Task<IEnumerable<NotificationDto>> GetUserNotificationsAsync(Guid userId, CancellationToken ct);
+    Task<PagedResponse<NotificationDto>> GetUserNotificationsAsync(Guid userId, PagedRequest request, CancellationToken ct);
 }
