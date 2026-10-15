@@ -107,9 +107,9 @@ public class JobController(IMediator mediator, IJobService jobService) : Control
     }
 
     [HttpGet("professional/{professionalId}")]
-    public async Task<IActionResult> GetJobsForProfessional(Guid professionalId)
+    public async Task<IActionResult> GetJobsForProfessional(Guid professionalId, [FromQuery] PagedRequest request)
     {
-        var result = await mediator.Send(new GetJobsForProfessionalQuery(professionalId));
+        var result = await mediator.Send(new GetJobsForProfessionalQuery(professionalId, request));
         return Ok(result);
     }
 
