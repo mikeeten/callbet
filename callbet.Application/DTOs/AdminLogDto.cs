@@ -11,6 +11,8 @@ namespace callbet.Application.DTOs
         public string Action { get; set; } = null!;
         public string? TargetEntity { get; set; }
         public Guid? TargetEntityId { get; set; }
+        public string? TargetUserName { get; set; }
+        public string? TargetUserEmail { get; set; }
         public DateTime Timestamp { get; set; }
     }
 }

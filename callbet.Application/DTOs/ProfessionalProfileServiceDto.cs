@@ -32,7 +32,7 @@ public class ProfessionalProfileServiceDto
 
     // Proximity / Location Info
     public double? DistanceKm { get; set; }
-    public int ServiceRadiusKm { get; set; } = 15;
+    public decimal ServiceRadiusKm { get; set; } = 15.0m;
     public string? LocationName { get; set; }
     public decimal? Latitude { get; set; }
     public decimal? Longitude { get; set; }
