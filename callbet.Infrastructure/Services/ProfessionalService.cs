@@ -34,7 +34,7 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
         var existing = await context.ProfessionalProfiles
             .FirstOrDefaultAsync(p => p.UserId == dto.UserId, ct);
 
-        int radius = (int)Math.Max(1, Math.Round(dto.ServiceRadiusKm > 0 ? dto.ServiceRadiusKm : 15));
+        decimal radius = dto.ServiceRadiusKm > 0 ? dto.ServiceRadiusKm : 15.0m;
 
         if (existing != null)
         {
@@ -505,6 +505,20 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
 
         var baseAddress = addresses.FirstOrDefault();
 
+        var verificationDocs = await context.VerificationRecords
+            .AsNoTracking()
+            .Where(vr => vr.UserId == profile.UserId)
+            .OrderByDescending(vr => vr.VerificationDate)
+            .Select(vr => new VerificationItemDto
+            {
+                Id = vr.Id,
+                DocumentType = vr.DocumentType,
+                DocumentUrl = vr.DocumentUrl,
+                IsVerified = vr.IsVerified,
+                VerificationDate = vr.VerificationDate
+            })
+            .ToListAsync(ct);
+
         return new GetProfessionalProfileDashboardDto
         {
             Id = profile.Id,
@@ -546,6 +560,7 @@ public class ProfessionalService(CallbetDbContext context) : IProfessionalServic
                 DocumentImageUrl = c.DocumentImageUrl
             }).ToList() : new List<CertificateDto>(),
             PortfolioItems = portfolioItems ?? new List<PortfolioItemDto>(),
+            VerificationRecords = verificationDocs,
             AvailabilitySchedules = profile.AvailabilitySchedules != null ? profile.AvailabilitySchedules.Select(s => new AvailabilityScheduleDto
             {
                 Id = s.Id,
