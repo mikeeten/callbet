@@ -36,11 +36,16 @@ public interface IAdminService
     Task<PagedResponse<AdminLogDto>> GetAdminLogsPagedAsync(PagedRequest request, CancellationToken ct);
 
     // Content Moderation
-    Task<IEnumerable<FlaggedReviewAdminDto>> GetFlaggedReviewsAsync(CancellationToken ct = default);
+    Task<PagedResponse<FlaggedReviewAdminDto>> GetFlaggedReviewsAsync(PagedRequest request, CancellationToken ct = default);
     Task<bool> DismissReviewFlagAsync(Guid reviewId, Guid adminUserId = default, CancellationToken ct = default);
 
     // Service Zones / Coverage Zones
     Task<IEnumerable<ServiceZoneDto>> GetServiceZonesAsync(CancellationToken ct = default);
     Task<ServiceZoneDto> CreateServiceZoneAsync(CreateServiceZoneDto dto, Guid adminUserId = default, CancellationToken ct = default);
     Task<bool> DeleteServiceZoneAsync(int neighborhoodId, Guid adminUserId = default, CancellationToken ct = default);
+
+    // Customer & Professional Reports
+    Task<PagedResponse<AdminReportDto>> GetReportsAsync(PagedRequest request, CancellationToken ct = default);
+    Task<bool> ResolveReportAsync(Guid reportId, Guid adminUserId = default, CancellationToken ct = default);
+    Task<bool> DeleteReportAsync(Guid reportId, Guid adminUserId = default, CancellationToken ct = default);
 }
