@@ -20,6 +20,7 @@ public interface IJobService
     Task<ReviewDto?> GetReviewByJobIdAsync(Guid jobId, CancellationToken ct);
     Task<bool> DeleteReviewAsync(Guid reviewId, Guid adminUserId = default, CancellationToken ct = default);
     Task<IEnumerable<object>> GetJobsForProfessionalAsync(Guid professionalId, CancellationToken ct);
+    Task<PagedResponse<ProfessionalJobDto>> GetJobsForProfessionalPagedAsync(Guid professionalId, PagedRequest request, CancellationToken ct);
     Task<IEnumerable<object>> GetJobsForCustomerAsync(Guid customerId, CancellationToken ct);
     Task<IEnumerable<object>> GetPaymentsForProfessionalAsync(Guid professionalId, CancellationToken ct);
 }
