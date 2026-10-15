@@ -11,7 +11,9 @@ namespace callbet.Infrastructure.Persistence.Configurations
             builder.HasKey(p => p.Id);
             builder.HasIndex(p => p.UserId).IsUnique();
 
-            builder.Property(p => p.Headline).HasMaxLength(255);
+            builder.Property(p => p.Headline).HasMaxLength(70);
+            builder.Property(p => p.Bio).HasMaxLength(200);
+            builder.Property(p => p.ServiceRadiusKm).HasColumnType("decimal(5, 2)");
             builder.Property(p => p.OverallRating).HasColumnType("decimal(3, 2)");
 
             builder.HasOne(p => p.User)
