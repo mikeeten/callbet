@@ -1,10 +1,10 @@
+using callbet.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using callbet.Domain.Entities;
 
 namespace callbet.Infrastructure.Persistence
 {
@@ -15,8 +15,8 @@ namespace callbet.Infrastructure.Persistence
             using var scope = serviceProvider.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<CallbetDbContext>();
 
-            // Automatically apply any pending EF Core migrations
-            if ((await context.Database.GetPendingMigrationsAsync()).Any())
+            // Apply any pending EF Core migrations on startup
+            if (context.Database.IsRelational())
             {
                 await context.Database.MigrateAsync();
             }
