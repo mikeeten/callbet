@@ -283,9 +283,9 @@ public class ChatNotificationService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = "Removed abusive chat message",
+            Action = "Removed abusive direct chat message",
             TargetEntity = "ChatMessage",
-            TargetEntityId = messageId,
+            TargetEntityId = message.SenderId,
             Timestamp = DateTime.UtcNow
         });
 
@@ -293,11 +293,39 @@ public class ChatNotificationService(
         return true;
     }
 
-    public async Task<IEnumerable<NotificationDto>> GetUserNotificationsAsync(Guid userId, CancellationToken ct)
+    public async Task<PagedResponse<NotificationDto>> GetUserNotificationsAsync(Guid userId, PagedRequest request, CancellationToken ct)
     {
-        return await context.Notifications
-            .Where(n => n.UserId == userId)
+        var query = context.Notifications
+            .AsNoTracking()
+            .Where(n => n.UserId == userId);
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var search = request.Search.Trim().ToLower();
+            query = query.Where(n => n.Message.ToLower().Contains(search));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            if (request.Status.Equals("unread", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(n => !n.IsRead);
+            }
+            else if (request.Status.Equals("read", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(n => n.IsRead);
+            }
+        }
+
+        var totalCount = await query.CountAsync(ct);
+
+        var page = request.Page < 1 ? 1 : request.Page;
+        var pageSize = request.PageSize < 1 ? 20 : request.PageSize;
+
+        var items = await query
             .OrderByDescending(n => n.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(n => new NotificationDto
             {
                 Id = n.Id,
@@ -308,5 +336,13 @@ public class ChatNotificationService(
                 Link = n.Link
             })
             .ToListAsync(ct);
+
+        return new PagedResponse<NotificationDto>
+        {
+            Items = items,
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize
+        };
     }
 }
