@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using callbet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using callbet.Domain.Entities;
 using callbet.Application.Interfaces;
 using callbet.Infrastructure.Services;
@@ -112,7 +113,10 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddDbContext<CallbetDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("CALLBET")));
+{
+    options.UseNpgsql(builder.Configuration.GetConnectionString("CALLBET"));
+    options.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
+});
 
 
 var app = builder.Build();
