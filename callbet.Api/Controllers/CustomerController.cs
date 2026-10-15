@@ -30,11 +30,15 @@ namespace callbet.Api.Controllers
         public async Task<IActionResult> ReportAbuse([FromBody] ReportAbuseDto dto, CancellationToken ct)
         {
             var reporterId = GetCurrentUserId();
+            Guid? targetReportedUserId = (dto.ReportedUserId.HasValue && dto.ReportedUserId.Value != Guid.Empty) 
+                ? dto.ReportedUserId.Value 
+                : null;
+
             var report = new Report
             {
                 Id = Guid.NewGuid(),
                 ReporterUserId = reporterId != Guid.Empty ? reporterId : (dto.ReporterUserId ?? Guid.Empty),
-                ReportedUserId = dto.ReportedUserId ?? Guid.Empty,
+                ReportedUserId = targetReportedUserId,
                 Reason = string.IsNullOrWhiteSpace(dto.Category) ? dto.Reason : $"[{dto.Category}] {dto.Reason}",
                 Details = dto.Details,
                 CreatedAt = DateTime.UtcNow,
