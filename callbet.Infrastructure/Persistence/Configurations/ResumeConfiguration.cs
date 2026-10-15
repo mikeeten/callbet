@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using callbet.Domain.Entities;
@@ -12,6 +14,7 @@ namespace callbet.Infrastructure.Persistence.Configurations
         public void Configure(EntityTypeBuilder<Resume> builder)
         {
             builder.HasKey(r => r.Id);
+            builder.Property(r => r.Summary).HasMaxLength(500);
 
             builder.HasOne(r => r.ProfessionalProfile)
                 .WithOne(p => p.Resume)
@@ -22,11 +25,14 @@ namespace callbet.Infrastructure.Persistence.Configurations
                 c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
                 c => c.ToList());
 
+            // Skills column is 'text' in PostgreSQL -> converts List<string> to/from JSON string
             builder.Property(r => r.Skills)
                 .HasConversion(
                     v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
                     v => JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>())
                 .Metadata.SetValueComparer(valueComparer);
+
+            // Languages column is 'text[]' in PostgreSQL -> Npgsql natively handles List<string> without string conversion
         }
     }
 }
