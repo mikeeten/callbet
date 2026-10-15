@@ -6,9 +6,9 @@ using callbet.Application.DTOs;
 namespace callbet.Application.Verification.Queries;
 
 public class GetVerificationRecordsHandler(IVerificationService service)
-    : IRequestHandler<GetVerificationRecordsQuery, PagedResponse<VerificationRecord>>
+    : IRequestHandler<GetVerificationRecordsQuery, PagedResponse<VerificationRecordDto>>
 {
-    public async Task<PagedResponse<VerificationRecord>> Handle(GetVerificationRecordsQuery request, CancellationToken ct)
+    public async Task<PagedResponse<VerificationRecordDto>> Handle(GetVerificationRecordsQuery request, CancellationToken ct)
     {
         return await service.GetVerificationRecordsAsync(request.Request, ct);
     }

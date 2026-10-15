@@ -4,4 +4,4 @@ using MediatR;
 
 namespace callbet.Application.Verification.Queries;
 
-public record GetVerificationRecordsQuery(PagedRequest Request) : IRequest<PagedResponse<VerificationRecord>>;
+public record GetVerificationRecordsQuery(PagedRequest Request) : IRequest<PagedResponse<VerificationRecordDto>>;
