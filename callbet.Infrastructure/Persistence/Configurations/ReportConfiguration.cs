@@ -9,7 +9,10 @@ namespace callbet.Infrastructure.Persistence.Configurations
         public void Configure(EntityTypeBuilder<Report> builder)
         {
             builder.HasKey(r => r.Id);
+            builder.Property(r => r.ReporterUserId).IsRequired();
+            builder.Property(r => r.ReportedUserId).IsRequired(false);
             builder.Property(r => r.Reason).IsRequired().HasMaxLength(500);
+            builder.Property(r => r.Details).HasMaxLength(2000);
         }
     }
 }
