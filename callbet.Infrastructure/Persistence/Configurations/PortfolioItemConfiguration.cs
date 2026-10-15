@@ -10,7 +10,8 @@ namespace callbet.Infrastructure.Persistence.Configurations
         {
             builder.HasKey(p => p.Id);
 
-            builder.Property(p => p.Title).IsRequired().HasMaxLength(255);
+            builder.Property(p => p.Title).IsRequired().HasMaxLength(70);
+            builder.Property(p => p.Description).HasMaxLength(500);
             builder.Property(p => p.ImageUrl).IsRequired();
 
             builder.HasIndex(p => p.ProfessionalProfileId);
