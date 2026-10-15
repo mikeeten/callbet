@@ -5,10 +5,10 @@ using callbet.Application.Interfaces;
 namespace callbet.Application.Admin.Queries;
 
 public class GetFlaggedReviewsHandler(IAdminService adminService)
-    : IRequestHandler<GetFlaggedReviewsQuery, IEnumerable<FlaggedReviewAdminDto>>
+    : IRequestHandler<GetFlaggedReviewsQuery, PagedResponse<FlaggedReviewAdminDto>>
 {
-    public async Task<IEnumerable<FlaggedReviewAdminDto>> Handle(GetFlaggedReviewsQuery request, CancellationToken ct)
+    public async Task<PagedResponse<FlaggedReviewAdminDto>> Handle(GetFlaggedReviewsQuery request, CancellationToken ct)
     {
-        return await adminService.GetFlaggedReviewsAsync(ct);
+        return await adminService.GetFlaggedReviewsAsync(request.Request, ct);
     }
 }
