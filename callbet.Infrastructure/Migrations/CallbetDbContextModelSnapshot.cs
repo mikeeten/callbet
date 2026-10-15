@@ -285,16 +285,16 @@ namespace callbet.Infrastructure.Migrations
 
                     b.Property<string>("Organization")
                         .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
+                        .HasMaxLength(70)
+                        .HasColumnType("character varying(70)");
 
                     b.Property<Guid>("ProfessionalProfileId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Title")
                         .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
+                        .HasMaxLength(70)
+                        .HasColumnType("character varying(70)");
 
                     b.HasKey("Id");
 
@@ -540,7 +540,8 @@ namespace callbet.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
-                        .HasColumnType("text");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<string>("ImageUrl")
                         .IsRequired()
@@ -551,8 +552,8 @@ namespace callbet.Infrastructure.Migrations
 
                     b.Property<string>("Title")
                         .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
+                        .HasMaxLength(70)
+                        .HasColumnType("character varying(70)");
 
                     b.HasKey("Id");
 
@@ -568,7 +569,8 @@ namespace callbet.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("Bio")
-                        .HasColumnType("text");
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<int>("CompletedJobsCount")
                         .HasColumnType("integer");
@@ -577,8 +579,8 @@ namespace callbet.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Headline")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
+                        .HasMaxLength(70)
+                        .HasColumnType("character varying(70)");
 
                     b.Property<bool>("IsVerified")
                         .HasColumnType("boolean");
@@ -586,8 +588,8 @@ namespace callbet.Infrastructure.Migrations
                     b.Property<decimal>("OverallRating")
                         .HasColumnType("decimal(3, 2)");
 
-                    b.Property<int>("ServiceRadiusKm")
-                        .HasColumnType("integer");
+                    b.Property<decimal>("ServiceRadiusKm")
+                        .HasColumnType("decimal(5, 2)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -680,7 +682,8 @@ namespace callbet.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Details")
-                        .HasColumnType("text");
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<bool>("IsResolved")
                         .HasColumnType("boolean");
@@ -690,7 +693,7 @@ namespace callbet.Infrastructure.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
-                    b.Property<Guid>("ReportedUserId")
+                    b.Property<Guid?>("ReportedUserId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("ReporterUserId")
@@ -726,7 +729,8 @@ namespace callbet.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Summary")
-                        .HasColumnType("text");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -751,6 +755,15 @@ namespace callbet.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("FlagReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("FlaggedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsFlagged")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid>("JobId")
                         .HasColumnType("uuid");
 
@@ -762,6 +775,10 @@ namespace callbet.Infrastructure.Migrations
 
                     b.Property<Guid>("ReviewerId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
