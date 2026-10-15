@@ -179,7 +179,7 @@ public class CustomerService(CallbetDbContext context) : ICustomerService
                         LocationName = locName
                     };
                 })
-                .Where(x => x.Distance == null || (x.Distance <= maxRadius && x.Distance <= x.Ps.ProfessionalProfile.ServiceRadiusKm))
+                .Where(x => x.Distance == null || (x.Distance <= maxRadius && x.Distance <= (double)x.Ps.ProfessionalProfile.ServiceRadiusKm))
                 .ToList();
 
             var totalNearby = nearbyItems.Count;
