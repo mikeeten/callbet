@@ -20,8 +20,12 @@ public class ProfessionalController(IMediator mediator, CallbetDbContext context
 {
     private Guid GetCurrentUserId()
     {
-        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(idClaim, out var userId) ? userId : Guid.Empty;
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value
+            ?? User.FindFirst("id")?.Value
+            ?? User.FindFirst("userId")?.Value
+            ?? User.FindFirst(ClaimTypes.Sid)?.Value;
+        return Guid.TryParse(claim, out var userId) ? userId : Guid.Empty;
     }
 
     private async Task<Guid> EnsureProfileIdAsync(Guid providedProfileId)
@@ -91,15 +95,7 @@ public class ProfessionalController(IMediator mediator, CallbetDbContext context
         var currentUserId = GetCurrentUserId();
         if (currentUserId == Guid.Empty)
         {
-            var fallbackProfile = await context.ProfessionalProfiles
-                .OrderByDescending(p => p.OverallRating)
-                .FirstOrDefaultAsync(ct);
-            if (fallbackProfile != null)
-            {
-                var pubRes = await mediator.Send(new GetProfessionalProfileDashboardQuery(fallbackProfile.Id), ct);
-                if (pubRes != null) return Ok(pubRes);
-            }
-            return Unauthorized(new { Message = "User identity could not be verified from token." });
+            return Unauthorized(new { Message = "User identity could not be verified from token. Please log in." });
         }
 
         var result = await mediator.Send(new GetProfessionalProfileDashboardQuery(currentUserId), ct);
@@ -619,11 +615,15 @@ public class ProfessionalController(IMediator mediator, CallbetDbContext context
     public async Task<IActionResult> ReportAbuse([FromBody] ReportAbuseDto dto, CancellationToken ct)
     {
         var reporterId = GetCurrentUserId();
+        Guid? targetReportedUserId = (dto.ReportedUserId.HasValue && dto.ReportedUserId.Value != Guid.Empty) 
+            ? dto.ReportedUserId.Value 
+            : null;
+
         var report = new Report
         {
             Id = Guid.NewGuid(),
             ReporterUserId = reporterId != Guid.Empty ? reporterId : (dto.ReporterUserId ?? Guid.Empty),
-            ReportedUserId = dto.ReportedUserId ?? Guid.Empty,
+            ReportedUserId = targetReportedUserId,
             Reason = string.IsNullOrWhiteSpace(dto.Category) ? dto.Reason : $"[{dto.Category}] {dto.Reason}",
             Details = dto.Details,
             CreatedAt = DateTime.UtcNow,
