@@ -18,7 +18,7 @@ namespace callbet.Api.Controllers;
 [ApiController]
 [Authorize(Policy = "AdminOnly")]
 [Route("api/admin")]
-public class AdminController(IMediator mediator, CallbetDbContext context) : ControllerBase
+public class AdminController(IMediator mediator, CallbetDbContext context, IAdminService adminService) : ControllerBase
 {
     private Guid GetCurrentUserId()
     {
@@ -163,9 +163,9 @@ public class AdminController(IMediator mediator, CallbetDbContext context) : Con
 
     // Content Moderation
     [HttpGet("moderation/reviews")]
-    public async Task<IActionResult> GetFlaggedReviews()
+    public async Task<IActionResult> GetFlaggedReviews([FromQuery] PagedRequest request)
     {
-        var result = await mediator.Send(new GetFlaggedReviewsQuery());
+        var result = await mediator.Send(new GetFlaggedReviewsQuery(request));
         return Ok(result);
     }
 
@@ -229,38 +229,26 @@ public class AdminController(IMediator mediator, CallbetDbContext context) : Con
     }
 
     [HttpGet("reports")]
-    public async Task<IActionResult> GetReports(CancellationToken ct)
+    public async Task<IActionResult> GetReports([FromQuery] PagedRequest request, CancellationToken ct)
     {
-        var reports = await (from r in context.Reports.AsNoTracking()
-                             join reporter in context.Users.AsNoTracking() on r.ReporterUserId equals reporter.Id into repJoin
-                             from reporterUser in repJoin.DefaultIfEmpty()
-                             join reported in context.Users.AsNoTracking() on r.ReportedUserId equals reported.Id into repdJoin
-                             from reportedUser in repdJoin.DefaultIfEmpty()
-                             orderby r.CreatedAt descending
-                             select new
-                             {
-                                 r.Id,
-                                 r.ReporterUserId,
-                                 ReporterName = reporterUser != null ? (reporterUser.FirstName + " " + reporterUser.LastName).Trim() : "System User",
-                                 ReporterEmail = reporterUser != null ? reporterUser.Email : null,
-                                 r.ReportedUserId,
-                                 ReportedUserName = reportedUser != null ? (reportedUser.FirstName + " " + reportedUser.LastName).Trim() : null,
-                                 r.Reason,
-                                 r.Details,
-                                 r.CreatedAt,
-                                 r.IsResolved
-                             }).ToListAsync(ct);
-        return Ok(reports);
+        var result = await mediator.Send(new GetReportsQuery(request), ct);
+        return Ok(result);
     }
 
     [HttpPut("reports/{id}/resolve")]
     public async Task<IActionResult> ResolveReport(Guid id, CancellationToken ct)
     {
-        var report = await context.Reports.FirstOrDefaultAsync(r => r.Id == id, ct);
-        if (report == null) return NotFound(new { Message = "Report not found." });
-        report.IsResolved = true;
-        await context.SaveChangesAsync(ct);
-        return Ok(new { Message = "Report marked as resolved.", Success = true });
+        var result = await adminService.ResolveReportAsync(id, GetCurrentUserId(), ct);
+        if (!result) return NotFound(new { Message = "Report not found." });
+        return Ok(new { Message = "Report marked as resolved and users notified.", Success = true });
+    }
+
+    [HttpDelete("reports/{id}")]
+    public async Task<IActionResult> DeleteReport(Guid id, CancellationToken ct)
+    {
+        var result = await adminService.DeleteReportAsync(id, GetCurrentUserId(), ct);
+        if (!result) return NotFound(new { Message = "Report not found." });
+        return Ok(new { Message = "Report removed successfully.", Success = true });
     }
 }
 
