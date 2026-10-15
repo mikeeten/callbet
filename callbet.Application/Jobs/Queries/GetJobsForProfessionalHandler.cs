@@ -1,13 +1,15 @@
-using MediatR;
+using callbet.Application.DTOs;
 using callbet.Application.Interfaces;
+using MediatR;
 
 namespace callbet.Application.Jobs.Queries;
 
 public class GetJobsForProfessionalHandler(IJobService jobService)
-    : IRequestHandler<GetJobsForProfessionalQuery, IEnumerable<object>>
+    : IRequestHandler<GetJobsForProfessionalQuery, PagedResponse<ProfessionalJobDto>>
 {
-    public async Task<IEnumerable<object>> Handle(GetJobsForProfessionalQuery request, CancellationToken ct)
+    public async Task<PagedResponse<ProfessionalJobDto>> Handle(GetJobsForProfessionalQuery request, CancellationToken ct)
     {
-        return await jobService.GetJobsForProfessionalAsync(request.ProfessionalId, ct);
+        var pagedReq = request.Request ?? new PagedRequest();
+        return await jobService.GetJobsForProfessionalPagedAsync(request.ProfessionalId, pagedReq, ct);
     }
 }
