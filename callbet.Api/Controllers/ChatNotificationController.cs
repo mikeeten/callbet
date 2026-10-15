@@ -117,19 +117,19 @@ public class ChatNotificationController(IMediator mediator) : ControllerBase
     // 6. Fetch my notifications (token direct)
     [HttpGet("my-notifications")]
     [HttpGet("notifications")]
-    public async Task<IActionResult> GetMyNotifications()
+    public async Task<IActionResult> GetMyNotifications([FromQuery] PagedRequest request)
     {
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty) return Unauthorized(new { Message = "User identity could not be verified from token." });
-        var result = await mediator.Send(new GetUserNotificationsQuery(userId));
+        var result = await mediator.Send(new GetUserNotificationsQuery(userId, request));
         return Ok(result);
     }
 
     // Fetch notifications for a user by userId
     [HttpGet("notifications/{userId}")]
-    public async Task<IActionResult> GetUserNotifications(Guid userId)
+    public async Task<IActionResult> GetUserNotifications(Guid userId, [FromQuery] PagedRequest request)
     {
-        var result = await mediator.Send(new GetUserNotificationsQuery(userId));
+        var result = await mediator.Send(new GetUserNotificationsQuery(userId, request));
         return Ok(result);
     }
 }
