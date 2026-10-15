@@ -9,7 +9,7 @@ namespace callbet.Domain.Entities
         public Guid UserId { get; set; }
         public string? Headline { get; set; }
         public string? Bio { get; set; }
-        public int ServiceRadiusKm { get; set; } = 15;
+        public decimal ServiceRadiusKm { get; set; } = 15.0m;
         public int YearsOfExperience { get; set; } = 0;
         public decimal OverallRating { get; set; } = 0.00m;
         public int CompletedJobsCount { get; set; } = 0;
