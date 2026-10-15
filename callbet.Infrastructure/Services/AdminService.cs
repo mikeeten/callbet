@@ -43,13 +43,14 @@ public class AdminService(
             }
         }
 
-        // Apply search filter on FirstName, LastName, or Email
+        // Apply search filter on FirstName, LastName, Email, or Phone
         if (!string.IsNullOrEmpty(request.Search))
         {
-            var searchPattern = $"%{request.Search}%";
+            var searchPattern = $"%{request.Search.Trim()}%";
             query = query.Where(u => (u.FirstName != null && EF.Functions.ILike(u.FirstName, searchPattern)) ||
                                      (u.LastName != null && EF.Functions.ILike(u.LastName, searchPattern)) ||
-                                     (u.Email != null && EF.Functions.ILike(u.Email, searchPattern)));
+                                     (u.Email != null && EF.Functions.ILike(u.Email, searchPattern)) ||
+                                     (u.Phone != null && EF.Functions.ILike(u.Phone, searchPattern)));
         }
 
         var totalCount = await query.CountAsync(ct);
@@ -100,7 +101,7 @@ public class AdminService(
             query = query.Where(p => p.IsVerified == request.IsVerified.Value);
         }
 
-        // Filter by Search pattern (Name, Email, Headline)
+        // Filter by Search pattern (Name, Email, Phone, Headline)
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
             var pattern = $"%{request.Search.Trim()}%";
@@ -108,6 +109,7 @@ public class AdminService(
                 (p.User.FirstName != null && EF.Functions.ILike(p.User.FirstName, pattern)) ||
                 (p.User.LastName != null && EF.Functions.ILike(p.User.LastName, pattern)) ||
                 (p.User.Email != null && EF.Functions.ILike(p.User.Email, pattern)) ||
+                (p.User.Phone != null && EF.Functions.ILike(p.User.Phone, pattern)) ||
                 (p.Headline != null && EF.Functions.ILike(p.Headline, pattern)));
         }
 
@@ -203,9 +205,9 @@ public class AdminService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"{(profile.IsVerified ? "Verified" : "Unverified")} professional profile ({user?.FirstName} {user?.LastName})",
+            Action = $"{(profile.IsVerified ? "Verified" : "Revoked verification for")} professional profile",
             TargetEntity = "ProfessionalProfile",
-            TargetEntityId = profile.Id,
+            TargetEntityId = user?.Id ?? profile.UserId,
             Timestamp = DateTime.UtcNow
         });
 
@@ -266,9 +268,9 @@ public class AdminService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Approved professional profile ({user.FirstName} {user.LastName})",
+            Action = "Approved professional profile and activated account",
             TargetEntity = "ProfessionalProfile",
-            TargetEntityId = profile?.Id ?? userId,
+            TargetEntityId = user.Id,
             Timestamp = DateTime.UtcNow
         });
 
@@ -302,7 +304,7 @@ public class AdminService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Suspended professional account ({user.FirstName} {user.LastName} - {user.Email})",
+            Action = "Suspended user account for policy violation",
             TargetEntity = "User",
             TargetEntityId = user.Id,
             Timestamp = DateTime.UtcNow
@@ -345,7 +347,7 @@ public class AdminService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Activated user account ({user.FirstName} {user.LastName} - {user.Email} [{user.Role}])",
+            Action = "Restored and activated user account",
             TargetEntity = "User",
             TargetEntityId = user.Id,
             Timestamp = DateTime.UtcNow
@@ -378,7 +380,7 @@ public class AdminService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Deleted user account ({user.FirstName} {user.LastName} - {user.Email} [{user.Role}])",
+            Action = "Permanently deleted user account",
             TargetEntity = "User",
             TargetEntityId = user.Id,
             Timestamp = DateTime.UtcNow
@@ -436,7 +438,7 @@ public class AdminService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Registered new administrator ({admin.FirstName} {admin.LastName} - {admin.Email})",
+            Action = "Registered new system administrator staff",
             TargetEntity = "User",
             TargetEntityId = admin.Id,
             Timestamp = DateTime.UtcNow
@@ -607,6 +609,12 @@ public class AdminService(
         var query = from l in context.AdminLogs.AsNoTracking()
                     join u in context.Users.AsNoTracking() on l.AdminUserId equals u.Id into uJoin
                     from admin in uJoin.DefaultIfEmpty()
+                    join tu in context.Users.AsNoTracking() on l.TargetEntityId equals (Guid?)tu.Id into tuJoin
+                    from targetUser in tuJoin.DefaultIfEmpty()
+                    join pp in context.ProfessionalProfiles.AsNoTracking() on l.TargetEntityId equals (Guid?)pp.Id into ppJoin
+                    from targetProf in ppJoin.DefaultIfEmpty()
+                    join ppUser in context.Users.AsNoTracking() on targetProf.UserId equals ppUser.Id into ppUserJoin
+                    from targetProfUser in ppUserJoin.DefaultIfEmpty()
                     select new AdminLogDto
                     {
                         Id = l.Id,
@@ -616,6 +624,12 @@ public class AdminService(
                         Action = l.Action,
                         TargetEntity = l.TargetEntity,
                         TargetEntityId = l.TargetEntityId,
+                        TargetUserName = targetUser != null
+                            ? (targetUser.FirstName + " " + targetUser.LastName).Trim()
+                            : (targetProfUser != null
+                                ? (targetProfUser.FirstName + " " + targetProfUser.LastName).Trim()
+                                : null),
+                        TargetUserEmail = targetUser != null ? targetUser.Email : (targetProfUser != null ? targetProfUser.Email : null),
                         Timestamp = l.Timestamp
                     };
 
@@ -625,7 +639,9 @@ public class AdminService(
             query = query.Where(l => EF.Functions.ILike(l.Action, search) ||
                                      (l.TargetEntity != null && EF.Functions.ILike(l.TargetEntity, search)) ||
                                      (l.AdminName != null && EF.Functions.ILike(l.AdminName, search)) ||
-                                     (l.AdminEmail != null && EF.Functions.ILike(l.AdminEmail, search)));
+                                     (l.AdminEmail != null && EF.Functions.ILike(l.AdminEmail, search)) ||
+                                     (l.TargetUserName != null && EF.Functions.ILike(l.TargetUserName, search)) ||
+                                     (l.TargetUserEmail != null && EF.Functions.ILike(l.TargetUserEmail, search)));
         }
 
         var total = await query.CountAsync(ct);
@@ -645,32 +661,83 @@ public class AdminService(
         };
     }
 
-    public async Task<IEnumerable<FlaggedReviewAdminDto>> GetFlaggedReviewsAsync(CancellationToken ct = default)
+    public async Task<PagedResponse<FlaggedReviewAdminDto>> GetFlaggedReviewsAsync(PagedRequest request, CancellationToken ct = default)
     {
-        var reviews = await (from r in context.Reviews.AsNoTracking()
-                             join reviewer in context.Users.AsNoTracking() on r.ReviewerId equals reviewer.Id into rJoin
-                             from reviewerUser in rJoin.DefaultIfEmpty()
-                             join reviewee in context.Users.AsNoTracking() on r.RevieweeId equals reviewee.Id into reJoin
-                             from revieweeUser in reJoin.DefaultIfEmpty()
-                             where r.IsFlagged || r.Status != "Active"
-                             orderby r.CreatedAt descending
-                             select new FlaggedReviewAdminDto
-                             {
-                                 Id = r.Id,
-                                 JobId = r.JobId,
-                                 ReviewerId = r.ReviewerId,
-                                 ReviewerName = reviewerUser != null ? (reviewerUser.FirstName + " " + reviewerUser.LastName).Trim() : "Anonymous Customer",
-                                 RevieweeId = r.RevieweeId,
-                                 ProfessionalName = revieweeUser != null ? (revieweeUser.FirstName + " " + revieweeUser.LastName).Trim() : "Assigned Professional",
-                                 Rating = r.Rating,
-                                 Comment = r.Comment,
-                                 FlagReason = r.FlagReason ?? "Flagged by platform moderation",
-                                 FlagDate = r.FlaggedAt ?? r.CreatedAt,
-                                 Status = r.Status,
-                                 CreatedAt = r.CreatedAt
-                             }).ToListAsync(ct);
+        var baseQuery = from r in context.Reviews.AsNoTracking()
+                        join reviewer in context.Users.AsNoTracking() on r.ReviewerId equals reviewer.Id into rJoin
+                        from reviewerUser in rJoin.DefaultIfEmpty()
+                        join reviewee in context.Users.AsNoTracking() on r.RevieweeId equals reviewee.Id into reJoin
+                        from revieweeUser in reJoin.DefaultIfEmpty()
+                        where r.IsFlagged || r.Status != "Active"
+                        select new { r, reviewerUser, revieweeUser };
 
-        return reviews;
+        // 1. Filter by Status (e.g. "Flagged", "Dismissed", "Removed", "all")
+        if (!string.IsNullOrWhiteSpace(request.Status) && !request.Status.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            var statusStr = request.Status.Trim();
+            if (statusStr.Equals("Flagged", StringComparison.OrdinalIgnoreCase))
+            {
+                baseQuery = baseQuery.Where(x => x.r.IsFlagged && x.r.Status == "Active");
+            }
+            else
+            {
+                baseQuery = baseQuery.Where(x => EF.Functions.ILike(x.r.Status, statusStr));
+            }
+        }
+
+        // 2. Filter by Search (Comment, FlagReason, Reviewer Name/Email, Professional Name/Email)
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var searchPattern = $"%{request.Search.Trim()}%";
+            baseQuery = baseQuery.Where(x =>
+                (x.r.Comment != null && EF.Functions.ILike(x.r.Comment, searchPattern)) ||
+                (x.r.FlagReason != null && EF.Functions.ILike(x.r.FlagReason, searchPattern)) ||
+                (x.reviewerUser != null && x.reviewerUser.FirstName != null && EF.Functions.ILike(x.reviewerUser.FirstName, searchPattern)) ||
+                (x.reviewerUser != null && x.reviewerUser.LastName != null && EF.Functions.ILike(x.reviewerUser.LastName, searchPattern)) ||
+                (x.reviewerUser != null && x.reviewerUser.Email != null && EF.Functions.ILike(x.reviewerUser.Email, searchPattern)) ||
+                (x.revieweeUser != null && x.revieweeUser.FirstName != null && EF.Functions.ILike(x.revieweeUser.FirstName, searchPattern)) ||
+                (x.revieweeUser != null && x.revieweeUser.LastName != null && EF.Functions.ILike(x.revieweeUser.LastName, searchPattern)) ||
+                (x.revieweeUser != null && x.revieweeUser.Email != null && EF.Functions.ILike(x.revieweeUser.Email, searchPattern)));
+        }
+
+        var totalCount = await baseQuery.CountAsync(ct);
+
+        // 3. Dynamic Ordering
+        baseQuery = request.OrderBy switch
+        {
+            "Rating" => request.Descending ? baseQuery.OrderByDescending(x => x.r.Rating) : baseQuery.OrderBy(x => x.r.Rating),
+            "Status" => request.Descending ? baseQuery.OrderByDescending(x => x.r.Status) : baseQuery.OrderBy(x => x.r.Status),
+            _ => request.Descending ? baseQuery.OrderBy(x => x.r.CreatedAt) : baseQuery.OrderByDescending(x => x.r.CreatedAt)
+        };
+
+        // 4. Pagination and Projection
+        var items = await baseQuery
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .Select(x => new FlaggedReviewAdminDto
+            {
+                Id = x.r.Id,
+                JobId = x.r.JobId,
+                ReviewerId = x.r.ReviewerId,
+                ReviewerName = x.reviewerUser != null ? (x.reviewerUser.FirstName + " " + x.reviewerUser.LastName).Trim() : "Anonymous Customer",
+                RevieweeId = x.r.RevieweeId,
+                ProfessionalName = x.revieweeUser != null ? (x.revieweeUser.FirstName + " " + x.revieweeUser.LastName).Trim() : "Assigned Professional",
+                Rating = x.r.Rating,
+                Comment = x.r.Comment,
+                FlagReason = x.r.FlagReason ?? "Flagged by platform moderation",
+                FlagDate = x.r.FlaggedAt ?? x.r.CreatedAt,
+                Status = x.r.Status,
+                CreatedAt = x.r.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        return new PagedResponse<FlaggedReviewAdminDto>
+        {
+            Items = items,
+            TotalCount = totalCount,
+            Page = request.Page,
+            PageSize = request.PageSize
+        };
     }
 
     public async Task<bool> DismissReviewFlagAsync(Guid reviewId, Guid adminUserId = default, CancellationToken ct = default)
@@ -686,9 +753,9 @@ public class AdminService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Dismissed flag on review {reviewId} for job #{review.JobId.ToString()[..Math.Min(8, review.JobId.ToString().Length)]}. Review retained.",
+            Action = $"Dismissed moderation flag on customer review (Rating: {review.Rating}★)",
             TargetEntity = "Review",
-            TargetEntityId = reviewId,
+            TargetEntityId = review.RevieweeId,
             Timestamp = DateTime.UtcNow
         });
         await context.SaveChangesAsync(ct);
@@ -825,6 +892,208 @@ public class AdminService(
             Action = $"Deleted official service zone '{neighborhoodName}' from Sub-City '{subCityName}'",
             TargetEntity = "ServiceZone",
             TargetEntityId = null,
+            Timestamp = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync(ct);
+
+        return true;
+    }
+
+    public async Task<PagedResponse<AdminReportDto>> GetReportsAsync(PagedRequest request, CancellationToken ct = default)
+    {
+        var baseQuery = from r in context.Reports.AsNoTracking()
+                        join reporter in context.Users.AsNoTracking() on r.ReporterUserId equals reporter.Id into repJoin
+                        from rep in repJoin.DefaultIfEmpty()
+                        join reported in context.Users.AsNoTracking() on r.ReportedUserId equals (Guid?)reported.Id into repedJoin
+                        from reped in repedJoin.DefaultIfEmpty()
+                        select new { r, rep, reped };
+
+        // 1. Filter by Resolution Status (e.g. "pending", "resolved", "all", or IsVerified bool)
+        if (!string.IsNullOrWhiteSpace(request.Status) && !request.Status.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            var statusStr = request.Status.Trim();
+            if (statusStr.Equals("resolved", StringComparison.OrdinalIgnoreCase) ||
+                statusStr.Equals("closed", StringComparison.OrdinalIgnoreCase) ||
+                statusStr.Equals("true", StringComparison.OrdinalIgnoreCase))
+            {
+                baseQuery = baseQuery.Where(x => x.r.IsResolved == true);
+            }
+            else if (statusStr.Equals("pending", StringComparison.OrdinalIgnoreCase) ||
+                     statusStr.Equals("open", StringComparison.OrdinalIgnoreCase) ||
+                     statusStr.Equals("unresolved", StringComparison.OrdinalIgnoreCase) ||
+                     statusStr.Equals("false", StringComparison.OrdinalIgnoreCase))
+            {
+                baseQuery = baseQuery.Where(x => x.r.IsResolved == false);
+            }
+        }
+        else if (request.IsVerified.HasValue)
+        {
+            baseQuery = baseQuery.Where(x => x.r.IsResolved == request.IsVerified.Value);
+        }
+
+        // 2. Filter by Role (Reporter user role e.g. Customer, Professional)
+        if (!string.IsNullOrWhiteSpace(request.Role) && !request.Role.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Enum.TryParse<UserRole>(request.Role.Trim(), true, out var parsedRole))
+            {
+                baseQuery = baseQuery.Where(x => x.rep != null && x.rep.Role == parsedRole);
+            }
+        }
+
+        // 3. Filter by Search pattern (Reason, Details, Reporter Name/Email, Reported Name/Email)
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var searchPattern = $"%{request.Search.Trim()}%";
+            baseQuery = baseQuery.Where(x =>
+                EF.Functions.ILike(x.r.Reason, searchPattern) ||
+                (x.r.Details != null && EF.Functions.ILike(x.r.Details, searchPattern)) ||
+                (x.rep != null && x.rep.FirstName != null && EF.Functions.ILike(x.rep.FirstName, searchPattern)) ||
+                (x.rep != null && x.rep.LastName != null && EF.Functions.ILike(x.rep.LastName, searchPattern)) ||
+                (x.rep != null && x.rep.Email != null && EF.Functions.ILike(x.rep.Email, searchPattern)) ||
+                (x.reped != null && x.reped.FirstName != null && EF.Functions.ILike(x.reped.FirstName, searchPattern)) ||
+                (x.reped != null && x.reped.LastName != null && EF.Functions.ILike(x.reped.LastName, searchPattern)) ||
+                (x.reped != null && x.reped.Email != null && EF.Functions.ILike(x.reped.Email, searchPattern)));
+        }
+
+        var totalCount = await baseQuery.CountAsync(ct);
+
+        // 4. Dynamic Sorting
+        baseQuery = request.OrderBy switch
+        {
+            "Reason" => request.Descending ? baseQuery.OrderByDescending(x => x.r.Reason) : baseQuery.OrderBy(x => x.r.Reason),
+            "Status" => request.Descending ? baseQuery.OrderByDescending(x => x.r.IsResolved) : baseQuery.OrderBy(x => x.r.IsResolved),
+            _ => request.Descending ? baseQuery.OrderBy(x => x.r.CreatedAt) : baseQuery.OrderByDescending(x => x.r.CreatedAt)
+        };
+
+        // 5. Pagination and Projection to DTO
+        var items = await baseQuery
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .Select(x => new AdminReportDto
+            {
+                Id = x.r.Id,
+                ReporterUserId = x.r.ReporterUserId,
+                ReporterName = x.rep != null ? (x.rep.FirstName + " " + x.rep.LastName).Trim() : "Anonymous User",
+                ReporterEmail = x.rep != null ? (x.rep.Email ?? "Unknown") : "Unknown",
+                ReporterRole = x.rep != null ? x.rep.Role.ToString() : "Customer",
+                ReportedUserId = x.r.ReportedUserId,
+                ReportedName = (x.r.ReportedUserId == null || x.r.ReportedUserId == Guid.Empty)
+                    ? "Platform / General Service"
+                    : (x.reped != null ? (x.reped.FirstName + " " + x.reped.LastName).Trim() : "Reported User"),
+                ReportedEmail = x.reped != null ? x.reped.Email : null,
+                ReportedRole = x.reped != null ? x.reped.Role.ToString() : null,
+                Reason = x.r.Reason,
+                Details = x.r.Details,
+                CreatedAt = x.r.CreatedAt,
+                IsResolved = x.r.IsResolved
+            })
+            .ToListAsync(ct);
+
+        return new PagedResponse<AdminReportDto>
+        {
+            Items = items,
+            TotalCount = totalCount,
+            Page = request.Page,
+            PageSize = request.PageSize
+        };
+    }
+
+    public async Task<bool> ResolveReportAsync(Guid reportId, Guid adminUserId = default, CancellationToken ct = default)
+    {
+        var report = await context.Reports.FirstOrDefaultAsync(r => r.Id == reportId, ct);
+        if (report == null) return false;
+
+        report.IsResolved = true;
+
+        // 1. Notify the Reporter (Customer or Professional)
+        var reporter = await context.Users.FirstOrDefaultAsync(u => u.Id == report.ReporterUserId, ct);
+        if (reporter != null)
+        {
+            var targetLink = reporter.Role == UserRole.Professional ? "/professional-notifications" : "/customer-notifications";
+            var reporterNotification = new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = reporter.Id,
+                Message = $"Your incident report regarding '{report.Reason}' has been reviewed and marked as Resolved by Administration.",
+                Link = targetLink,
+                IsRead = false,
+                CreatedAt = DateTime.UtcNow
+            };
+            context.Notifications.Add(reporterNotification);
+
+            var notifDto = new NotificationDto
+            {
+                Id = reporterNotification.Id,
+                UserId = reporterNotification.UserId,
+                Message = reporterNotification.Message,
+                Link = reporterNotification.Link,
+                IsRead = false,
+                CreatedAt = reporterNotification.CreatedAt
+            };
+            await hubContext.Clients.Group($"user_{reporter.Id}").ReceiveNotification(notifDto);
+        }
+
+        // 2. Also notify the Reported User if specified
+        if (report.ReportedUserId.HasValue && report.ReportedUserId.Value != Guid.Empty && report.ReportedUserId.Value != report.ReporterUserId)
+        {
+            var reportedUser = await context.Users.FirstOrDefaultAsync(u => u.Id == report.ReportedUserId.Value, ct);
+            if (reportedUser != null)
+            {
+                var targetLink = reportedUser.Role == UserRole.Professional ? "/professional-notifications" : "/customer-notifications";
+                var reportedNotification = new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = reportedUser.Id,
+                    Message = $"The reported inquiry concerning '{report.Reason}' has been officially reviewed and closed by Administration.",
+                    Link = targetLink,
+                    IsRead = false,
+                    CreatedAt = DateTime.UtcNow
+                };
+                context.Notifications.Add(reportedNotification);
+
+                var reportedNotifDto = new NotificationDto
+                {
+                    Id = reportedNotification.Id,
+                    UserId = reportedNotification.UserId,
+                    Message = reportedNotification.Message,
+                    Link = reportedNotification.Link,
+                    IsRead = false,
+                    CreatedAt = reportedNotification.CreatedAt
+                };
+                await hubContext.Clients.Group($"user_{reportedUser.Id}").ReceiveNotification(reportedNotifDto);
+            }
+        }
+
+        // 3. Record Admin Audit Log
+        context.AdminLogs.Add(new AdminLog
+        {
+            Id = Guid.NewGuid(),
+            AdminUserId = adminUserId,
+            Action = $"Marked user incident report '{report.Reason}' as Resolved and notified user",
+            TargetEntity = "Report",
+            TargetEntityId = report.ReportedUserId,
+            Timestamp = DateTime.UtcNow
+        });
+        await context.SaveChangesAsync(ct);
+
+        return true;
+    }
+
+    public async Task<bool> DeleteReportAsync(Guid reportId, Guid adminUserId = default, CancellationToken ct = default)
+    {
+        var report = await context.Reports.FirstOrDefaultAsync(r => r.Id == reportId, ct);
+        if (report == null) return false;
+
+        context.Reports.Remove(report);
+        await context.SaveChangesAsync(ct);
+
+        context.AdminLogs.Add(new AdminLog
+        {
+            Id = Guid.NewGuid(),
+            AdminUserId = adminUserId,
+            Action = $"Deleted incident report '{report.Reason}' from system records",
+            TargetEntity = "Report",
+            TargetEntityId = report.ReportedUserId,
             Timestamp = DateTime.UtcNow
         });
         await context.SaveChangesAsync(ct);
