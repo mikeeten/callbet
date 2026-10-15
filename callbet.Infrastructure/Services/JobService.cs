@@ -196,6 +196,32 @@ public class JobService(
         var job = await context.Jobs.FindAsync(new object[] { jobId }, ct);
         if (job == null) return false;
 
+        // Cascade delete associated reviews and their replies
+        var reviews = await context.Reviews
+            .Include(r => r.Reply)
+            .Where(r => r.JobId == jobId)
+            .ToListAsync(ct);
+        if (reviews.Count > 0)
+        {
+            foreach (var rev in reviews)
+            {
+                if (rev.Reply != null)
+                {
+                    context.ReviewReplies.Remove(rev.Reply);
+                }
+            }
+            context.Reviews.RemoveRange(reviews);
+        }
+
+        // Cascade delete associated payments
+        var payments = await context.Payments
+            .Where(p => p.JobId == jobId)
+            .ToListAsync(ct);
+        if (payments.Count > 0)
+        {
+            context.Payments.RemoveRange(payments);
+        }
+
         context.Jobs.Remove(job);
         await context.SaveChangesAsync(ct);
         return true;
@@ -448,9 +474,9 @@ public class JobService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Removed review (Rating: {review.Rating}★) for user {review.RevieweeId}",
+            Action = $"Removed abusive customer review (Rating: {review.Rating}★)",
             TargetEntity = "Review",
-            TargetEntityId = reviewId,
+            TargetEntityId = review.RevieweeId,
             Timestamp = DateTime.UtcNow
         });
 
@@ -472,14 +498,164 @@ public class JobService(
         return true;
     }
 
+    public async Task<PagedResponse<ProfessionalJobDto>> GetJobsForProfessionalPagedAsync(Guid professionalId, PagedRequest request, CancellationToken ct)
+    {
+        if (professionalId == Guid.Empty)
+        {
+            return new PagedResponse<ProfessionalJobDto>
+            {
+                Items = new List<ProfessionalJobDto>(),
+                TotalCount = 0,
+                Page = request.Page < 1 ? 1 : request.Page,
+                PageSize = request.PageSize < 1 ? 10 : request.PageSize
+            };
+        }
+
+        var profile = await context.ProfessionalProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == professionalId || p.UserId == professionalId, ct);
+        var targetUserId = profile != null ? profile.UserId : professionalId;
+        var targetProfileId = profile != null ? profile.Id : professionalId;
+
+        var baseQuery = from j in context.Jobs.AsNoTracking()
+                        where (j.ProfessionalId == targetUserId || j.ProfessionalId == targetProfileId)
+                              && j.ProfessionalId != Guid.Empty
+                              && j.Status != JobStatus.Draft
+                        join u in context.Users.AsNoTracking() on j.CustomerId equals u.Id into users
+                        from u in users.DefaultIfEmpty()
+                        join s in context.Services.AsNoTracking() on j.ServiceId equals s.Id into services
+                        from s in services.DefaultIfEmpty()
+                        join a in context.Addresses.AsNoTracking() on j.AddressId equals a.Id into addrs
+                        from a in addrs.DefaultIfEmpty()
+                        select new { j, u, s, a };
+
+        if (!string.IsNullOrWhiteSpace(request.Status) && !request.Status.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            var st = request.Status.Trim().ToLower();
+            if (st == "assigned" || st == "created")
+            {
+                baseQuery = baseQuery.Where(x => x.j.Status == JobStatus.Assigned);
+            }
+            else if (st == "in_progress" || st == "inprogress")
+            {
+                baseQuery = baseQuery.Where(x => x.j.Status == JobStatus.InProgress);
+            }
+            else if (st == "completed" || st == "completedpendingapproval")
+            {
+                baseQuery = baseQuery.Where(x => x.j.Status == JobStatus.CompletedPendingApproval);
+            }
+            else if (st == "closed")
+            {
+                baseQuery = baseQuery.Where(x => x.j.Status == JobStatus.Closed);
+            }
+            else if (st == "cancelled")
+            {
+                baseQuery = baseQuery.Where(x => x.j.Status == JobStatus.Cancelled);
+            }
+            else if (Enum.TryParse<JobStatus>(request.Status, true, out var parsedStatus))
+            {
+                baseQuery = baseQuery.Where(x => x.j.Status == parsedStatus);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var search = request.Search.Trim().ToLower();
+            baseQuery = baseQuery.Where(x =>
+                (x.s != null && x.s.Name.ToLower().Contains(search)) ||
+                (x.u != null && ((x.u.FirstName ?? "") + " " + (x.u.LastName ?? "")).ToLower().Contains(search)) ||
+                (x.a != null && ((x.a.Street ?? "") + " " + (x.a.City ?? "")).ToLower().Contains(search)) ||
+                (x.j.Description != null && x.j.Description.ToLower().Contains(search))
+            );
+        }
+
+        var orderBy = (request.OrderBy ?? "").Trim().ToLower();
+        if (orderBy == "price_desc" || (orderBy == "price" && request.Descending))
+        {
+            baseQuery = baseQuery.OrderByDescending(x => x.j.Price);
+        }
+        else if (orderBy == "price_asc" || (orderBy == "price" && !request.Descending))
+        {
+            baseQuery = baseQuery.OrderBy(x => x.j.Price);
+        }
+        else
+        {
+            baseQuery = baseQuery.OrderByDescending(x => x.j.ScheduledDateTime).ThenByDescending(x => x.j.CreatedAt);
+        }
+
+        var totalCount = await baseQuery.CountAsync(ct);
+        var page = request.Page < 1 ? 1 : request.Page;
+        var pageSize = request.PageSize < 1 ? 10 : request.PageSize;
+
+        var rawList = await baseQuery
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new
+            {
+                x.j.Id,
+                ServiceName = x.s != null ? x.s.Name : "Home Service",
+                CustomerName = x.u != null ? ((x.u.FirstName ?? "") + " " + (x.u.LastName ?? "")).Trim() : "Customer",
+                CustomerPhone = x.u != null ? (x.u.PhoneNumber ?? x.u.Phone) : null,
+                CustomerEmail = x.u != null ? x.u.Email : null,
+                x.j.CustomerId,
+                x.j.ProfessionalId,
+                Status = x.j.Status,
+                x.j.Price,
+                x.j.ScheduledDateTime,
+                Street = x.a != null ? x.a.Street : null,
+                City = x.a != null ? x.a.City : null,
+                x.j.Description,
+                x.j.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        var items = rawList.Select(x => new ProfessionalJobDto
+        {
+            Id = x.Id,
+            ServiceName = x.ServiceName,
+            CustomerName = x.CustomerName,
+            CustomerPhone = x.CustomerPhone,
+            CustomerEmail = x.CustomerEmail,
+            CustomerId = x.CustomerId,
+            ProfessionalId = x.ProfessionalId,
+            Status = x.Status.ToString(),
+            Price = x.Price,
+            NetPayout = Math.Round(x.Price * 0.85m, 2),
+            PlatformFee = Math.Round(x.Price * 0.15m, 2),
+            ScheduledDate = x.ScheduledDateTime.ToString("yyyy-MM-dd hh:mm tt"),
+            ScheduledDateTime = x.ScheduledDateTime,
+            Address = !string.IsNullOrEmpty(x.Street) ? $"{x.Street}, {x.City}" : "Location Provided Upon Booking",
+            Street = x.Street,
+            City = x.City,
+            Description = x.Description,
+            CreatedAt = x.CreatedAt
+        }).ToList();
+
+        return new PagedResponse<ProfessionalJobDto>
+        {
+            Items = items,
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
     public async Task<IEnumerable<object>> GetJobsForProfessionalAsync(Guid professionalId, CancellationToken ct)
     {
+        if (professionalId == Guid.Empty)
+        {
+            return Enumerable.Empty<object>();
+        }
+
         var profile = await context.ProfessionalProfiles
             .FirstOrDefaultAsync(p => p.Id == professionalId || p.UserId == professionalId, ct);
         var targetUserId = profile != null ? profile.UserId : professionalId;
+        var targetProfileId = profile != null ? profile.Id : professionalId;
 
         var rawList = await context.Jobs
-            .Where(j => j.ProfessionalId == targetUserId || j.ProfessionalId == professionalId)
+            .Where(j => (j.ProfessionalId == targetUserId || j.ProfessionalId == targetProfileId)
+                        && j.ProfessionalId != Guid.Empty
+                        && j.Status != JobStatus.Draft)
             .Join(context.Users,
                   j => j.CustomerId,
                   u => u.Id,
