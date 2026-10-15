@@ -25,59 +25,82 @@ public class VerificationService(
         };
 
         context.VerificationRecords.Add(record);
-
-        // 📝 Log pending verification for admin review
-        context.AdminLogs.Add(new AdminLog
-        {
-            Id = Guid.NewGuid(),
-            AdminUserId = Guid.Empty,
-            Action = $"Verification pending for Professional {dto.UserId}",
-            TargetEntity = "VerificationRecord",
-            TargetEntityId = record.Id,
-            Timestamp = DateTime.UtcNow
-        });
-
         await context.SaveChangesAsync(ct);
         return record.Id;
     }
 
-    public async Task<PagedResponse<VerificationRecord>> GetVerificationRecordsAsync(
+    public async Task<PagedResponse<VerificationRecordDto>> GetVerificationRecordsAsync(
         PagedRequest request, CancellationToken ct)
     {
-        var query = context.VerificationRecords.AsNoTracking();
+        var baseQuery = from vr in context.VerificationRecords.AsNoTracking()
+                        join u in context.Users.AsNoTracking() on vr.UserId equals u.Id into uJoin
+                        from user in uJoin.DefaultIfEmpty()
+                        join p in context.ProfessionalProfiles.AsNoTracking() on vr.UserId equals p.UserId into pJoin
+                        from profile in pJoin.DefaultIfEmpty()
+                        select new
+                        {
+                            vr.Id,
+                            vr.UserId,
+                            ProfessionalName = user != null ? (user.FirstName + " " + user.LastName).Trim() : "Applicant",
+                            Email = user != null ? user.Email : string.Empty,
+                            Phone = user != null ? user.Phone : string.Empty,
+                            Headline = profile != null ? profile.Headline : "Licensed Specialist",
+                            vr.DocumentType,
+                            vr.DocumentUrl,
+                            vr.IsVerified,
+                            vr.VerificationDate
+                        };
 
         // Filter by verification status
         if (request.IsVerified.HasValue)
         {
-            query = query.Where(vr => vr.IsVerified == request.IsVerified.Value);
+            baseQuery = baseQuery.Where(x => x.IsVerified == request.IsVerified.Value);
         }
 
-        // Search by document type or user
-        if (!string.IsNullOrEmpty(request.Search))
+        // Search by document type, user email, or applicant name
+        if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            var searchPattern = $"%{request.Search}%";
-            query = query.Where(vr => EF.Functions.ILike(vr.DocumentType, searchPattern)); 
-            // ||
-                                    //  EF.Functions.ILike(vr.DocumentUrl, searchPattern));
+            var searchPattern = $"%{request.Search.Trim()}%";
+            baseQuery = baseQuery.Where(x => 
+                EF.Functions.ILike(x.DocumentType, searchPattern) ||
+                (x.Email != null && EF.Functions.ILike(x.Email, searchPattern)) ||
+                EF.Functions.ILike(x.ProfessionalName, searchPattern) ||
+                (x.Headline != null && EF.Functions.ILike(x.Headline, searchPattern)));
         }
 
         // Count before paging
-        var totalCount = await query.CountAsync(ct);
+        var totalCount = await baseQuery.CountAsync(ct);
 
         // Order by safe columns
-        query = request.OrderBy switch
+        var orderedQuery = request.OrderBy switch
         {
-            "DocumentType" => request.Descending ? query.OrderByDescending(vr => vr.DocumentType) : query.OrderBy(vr => vr.DocumentType),
-            "VerificationDate" => request.Descending ? query.OrderByDescending(vr => vr.VerificationDate) : query.OrderBy(vr => vr.VerificationDate),
-            _ => query.OrderBy(vr => vr.VerificationDate)
+            "DocumentType" => request.Descending ? baseQuery.OrderByDescending(x => x.DocumentType) : baseQuery.OrderBy(x => x.DocumentType),
+            "ProfessionalName" => request.Descending ? baseQuery.OrderByDescending(x => x.ProfessionalName) : baseQuery.OrderBy(x => x.ProfessionalName),
+            "Email" => request.Descending ? baseQuery.OrderByDescending(x => x.Email) : baseQuery.OrderBy(x => x.Email),
+            "VerificationDate" => request.Descending ? baseQuery.OrderByDescending(x => x.VerificationDate) : baseQuery.OrderBy(x => x.VerificationDate),
+            _ => request.Descending ? baseQuery.OrderByDescending(x => x.VerificationDate) : baseQuery.OrderBy(x => x.VerificationDate)
         };
 
-        var items = await query
+        var rawItems = await orderedQuery
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
             .ToListAsync(ct);
 
-        return new PagedResponse<VerificationRecord>
+        var items = rawItems.Select(x => new VerificationRecordDto
+        {
+            Id = x.Id,
+            UserId = x.UserId,
+            ProfessionalName = x.ProfessionalName,
+            Email = x.Email,
+            Phone = x.Phone,
+            Headline = x.Headline,
+            DocumentType = x.DocumentType,
+            DocumentUrl = x.DocumentUrl,
+            IsVerified = x.IsVerified,
+            VerificationDate = x.VerificationDate
+        }).ToList();
+
+        return new PagedResponse<VerificationRecordDto>
         {
             Items = items,
             TotalCount = totalCount,
@@ -126,9 +149,9 @@ public class VerificationService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Approved professional verification ({record.DocumentType})",
+            Action = $"Approved professional trade verification ({record.DocumentType})",
             TargetEntity = "VerificationRecord",
-            TargetEntityId = record.Id,
+            TargetEntityId = record.UserId,
             Timestamp = DateTime.UtcNow
         });
 
@@ -159,9 +182,9 @@ public class VerificationService(
         {
             Id = Guid.NewGuid(),
             AdminUserId = adminUserId,
-            Action = $"Deleted verification record ({record.DocumentType} for User {record.UserId})",
+            Action = $"Deleted professional verification record ({record.DocumentType})",
             TargetEntity = "VerificationRecord",
-            TargetEntityId = record.Id,
+            TargetEntityId = record.UserId,
             Timestamp = DateTime.UtcNow
         });
 
